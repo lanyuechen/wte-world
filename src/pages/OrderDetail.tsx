@@ -29,10 +29,11 @@ export function OrderDetailPage() {
   const needCount = entries.filter(([, s]) => s === 'need').length
   const haveCount = entries.filter(([, s]) => s === 'have').length
 
-  const setStatus = (name: string, status: IngredientStatus) => {
+  const toggleStatus = (name: string, status: IngredientStatus) => {
+    const nextStatus: IngredientStatus = status === 'have' ? 'need' : 'have'
     const next: Order = {
       ...order,
-      ingredientStatus: { ...order.ingredientStatus, [name]: status },
+      ingredientStatus: { ...order.ingredientStatus, [name]: nextStatus },
       updatedAt: new Date().toISOString(),
     }
     saveOrder(next)
@@ -100,27 +101,22 @@ export function OrderDetailPage() {
           <p className="od-card-empty">暂无食材</p>
         ) : (
           <ul className="od-ing-list">
-            {entries.map(([name, status]) => (
-              <li key={name} className={status === 'need' ? 'is-need' : 'is-have'}>
-                <span className="od-ing-name">{name}</span>
-                <div className="od-ing-actions" role="group">
-                  <button
-                    type="button"
-                    className={status === 'have' ? 'on' : ''}
-                    onClick={() => setStatus(name, 'have')}
-                  >
-                    已有
-                  </button>
-                  <button
-                    type="button"
-                    className={status === 'need' ? 'on need' : ''}
-                    onClick={() => setStatus(name, 'need')}
-                  >
-                    需购
-                  </button>
-                </div>
-              </li>
-            ))}
+            {entries.map(([name, status]) => {
+              const have = status === 'have'
+              return (
+                <li key={name} className={have ? 'is-have' : 'is-need'}>
+                  <label className="od-ing-row">
+                    <input
+                      type="checkbox"
+                      className="od-ing-check"
+                      checked={have}
+                      onChange={() => toggleStatus(name, status)}
+                    />
+                    <span className="od-ing-name">{name}</span>
+                  </label>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>

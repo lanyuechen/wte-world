@@ -11,7 +11,9 @@ npm run dev
 
 ## 配置
 
-仓库、Token、协同房间号、Achex、分享地址均写在 [`src/config.ts`](src/config.ts)。
+仓库、协同房间号、Achex、分享地址写在 [`src/config.ts`](src/config.ts)。
+
+**不要把 GitHub Token 提交进仓库**（提交后会被 GitHub 立刻吊销）。首次打开会提示输入 Token 并写入 localStorage；扫码页二维码会带上 Token，家人扫码后自动写入本机。
 
 ## 部署（GitHub Pages + jsDelivr）
 

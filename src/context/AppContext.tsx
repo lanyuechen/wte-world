@@ -15,7 +15,6 @@ import {
   deleteThumbnail,
   fetchAppData,
   putAppData,
-  testConnection,
   thumbnailRawUrl,
   uploadThumbnail,
 } from '../lib/github'
@@ -23,7 +22,6 @@ import { loadCachedData, loadSettings, saveCachedData, saveSettings } from '../l
 
 type Status = {
   syncing: boolean
-  message: string
   error: string
   /** 顶部条重试行为：写回 / 拉取 */
   retry: 'persist' | 'sync' | null
@@ -37,14 +35,13 @@ type AppContextValue = {
   configured: boolean
   thumbUrl: (path: string) => string
   setSettings: (next: AppSettings) => void
+  applyGithubToken: (token: string) => Promise<void>
   syncFromRemote: () => Promise<void>
-  testGithub: () => Promise<string>
   saveRecipe: (recipe: Recipe, thumbnailDataUrl?: string | null) => void
   removeRecipe: (id: string) => void
   setAvailableIngredients: (list: string[]) => void
   saveOrder: (order: Order, availableIngredients?: string[]) => void
   removeOrder: (id: string) => void
-  setCollabRoomId: (roomId: string) => void
   retryPersist: () => void
   dismissPersistError: () => void
   allIngredients: string[]
@@ -133,7 +130,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [status, setStatus] = useState<Status>({
     syncing: false,
-    message: '',
     error: '',
     retry: null,
   })
@@ -167,7 +163,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStatus((s) => ({
       ...s,
       syncing: true,
-      message: s.error ? '重试中…' : '保存中…',
       error: '',
       retry: null,
     }))
@@ -190,7 +185,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setStatus({
         syncing: false,
-        message: '已保存',
         error: '',
         retry: null,
       })
@@ -199,7 +193,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dirtyRef.current = true
       setStatus({
         syncing: false,
-        message: '',
         error:
           err instanceof Error ? err.message : '保存失败（已写入本地缓存）',
         retry: 'persist',
@@ -227,18 +220,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const syncFromRemote = useCallback(async () => {
-    const github = githubFromSettings(settings)
+    const github = githubFromSettings(settingsRef.current)
     if (!github.token || github.owner.startsWith('YOUR_')) {
       setStatus((s) => ({
         ...s,
-        error: '请先在 src/config.ts 填写仓库与 Token',
+        error: '请先输入 GitHub Token',
         retry: null,
       }))
       return
     }
     setStatus({
       syncing: true,
-      message: '同步中…',
       error: '',
       retry: null,
     })
@@ -252,19 +244,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveCachedData(res.data, res.sha)
       setStatus({
         syncing: false,
-        message: res.created ? '已初始化远程 app.json' : '同步完成',
         error: '',
         retry: null,
       })
     } catch (err) {
       setStatus({
         syncing: false,
-        message: '',
         error: err instanceof Error ? err.message : '同步失败',
         retry: 'sync',
       })
     }
-  }, [settings])
+  }, [])
+
+  const applyGithubToken = useCallback(
+    async (token: string) => {
+      const trimmed = token.trim()
+      if (!trimmed) return
+      const next: AppSettings = {
+        ...settingsRef.current,
+        github: {
+          owner: GITHUB_CONFIG.owner,
+          repo: GITHUB_CONFIG.repo,
+          branch: GITHUB_CONFIG.branch,
+          token: trimmed,
+        },
+      }
+      setSettingsState(next)
+      settingsRef.current = next
+      saveSettings(next)
+      await syncFromRemote()
+    },
+    [syncFromRemote],
+  )
 
   useEffect(() => {
     if (configured) {
@@ -371,17 +382,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [commit],
   )
 
-  const setCollabRoomId = useCallback(
-    (roomId: string) => {
-      commit((prev) => ({ ...prev, collabRoomId: roomId || 'home' }))
-    },
-    [commit],
-  )
-
-  const testGithub = useCallback(async () => {
-    return testConnection(githubFromSettings(settings))
-  }, [settings])
-
   const allIngredients = useMemo(() => {
     const set = new Set<string>(data.availableIngredients)
     data.recipes.forEach((r) => r.ingredients.forEach((i) => set.add(i)))
@@ -396,14 +396,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     configured,
     thumbUrl,
     setSettings,
+    applyGithubToken,
     syncFromRemote,
-    testGithub,
     saveRecipe,
     removeRecipe,
     setAvailableIngredients,
     saveOrder,
     removeOrder,
-    setCollabRoomId,
     retryPersist,
     dismissPersistError,
     allIngredients,

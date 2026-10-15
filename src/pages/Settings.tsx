@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
+import { useApp } from '../context/AppContext'
 import {
   createScanRoom,
   loadScanRooms,
@@ -22,6 +23,8 @@ function CloseIcon() {
 }
 
 export function SettingsPage() {
+  const { settings } = useApp()
+  const token = settings.github.token.trim()
   const [rooms, setRooms] = useState<ScanRoom[]>(() => loadScanRooms())
   const [qrMap, setQrMap] = useState<Record<string, string>>({})
 
@@ -30,12 +33,15 @@ export function SettingsPage() {
     void (async () => {
       const entries = await Promise.all(
         rooms.map(async (room) => {
-          const dataUrl = await QRCode.toDataURL(buildScanShareUrl(room.id), {
-            width: 320,
-            margin: 1,
-            errorCorrectionLevel: 'M',
-            color: { dark: '#12261d', light: '#fffdf8' },
-          })
+          const dataUrl = await QRCode.toDataURL(
+            buildScanShareUrl(room.id, token),
+            {
+              width: 320,
+              margin: 1,
+              errorCorrectionLevel: 'M',
+              color: { dark: '#12261d', light: '#fffdf8' },
+            },
+          )
           return [room.id, dataUrl] as const
         }),
       )
@@ -46,7 +52,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [rooms])
+  }, [rooms, token])
 
   const newRoom = () => {
     createScanRoom(`房间 ${rooms.length + 1}`)

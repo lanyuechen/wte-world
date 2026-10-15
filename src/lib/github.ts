@@ -18,7 +18,7 @@ function toGithubError(err: unknown): Error {
   const message = String((err as { message?: string })?.message ?? '')
   if (status === 401 || /bad credentials/i.test(message)) {
     return new Error(
-      'GitHub Token 无效或已过期，请更新 src/config.ts 里的 SCAN_SHARE_TOKEN',
+      'GitHub Token 无效或已过期，请重新输入或扫描带 Token 的二维码',
     )
   }
   if (status === 403) {
@@ -46,7 +46,6 @@ export function thumbnailRawUrl(
 export async function fetchAppData(settings: GithubSettings): Promise<{
   data: AppData
   sha: string | null
-  created: boolean
 }> {
   assertConfigured(settings)
   const octokit = client(settings.token)
@@ -65,14 +64,13 @@ export async function fetchAppData(settings: GithubSettings): Promise<{
     return {
       data: normalizeAppData({ ...EMPTY_APP_DATA, ...parsed }),
       sha: res.data.sha,
-      created: false,
     }
   } catch (err: unknown) {
     const status = (err as { status?: number })?.status
     if (status === 404) {
       const initial = { ...EMPTY_APP_DATA }
       const { sha } = await putAppData(settings, initial, null)
-      return { data: initial, sha, created: true }
+      return { data: initial, sha }
     }
     throw toGithubError(err)
   }
@@ -178,19 +176,5 @@ export async function deleteThumbnail(
     })
   } catch {
     // best effort
-  }
-}
-
-export async function testConnection(settings: GithubSettings): Promise<string> {
-  assertConfigured(settings)
-  const octokit = client(settings.token)
-  try {
-    const repo = await octokit.repos.get({
-      owner: settings.owner,
-      repo: settings.repo,
-    })
-    return `已连接 ${repo.data.full_name}`
-  } catch (err: unknown) {
-    throw toGithubError(err)
   }
 }

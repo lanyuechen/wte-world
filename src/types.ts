@@ -28,7 +28,7 @@ export type AppData = {
   collabRoomId: string
 }
 
-export type CollabMember = {
+type CollabMember = {
   id: string
   name: string
 }
@@ -50,7 +50,7 @@ export type GithubSettings = {
   token: string
 }
 
-export type AchexSettings = {
+type AchexSettings = {
   userId: string
   password: string
   hub: string

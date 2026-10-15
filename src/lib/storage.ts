@@ -6,7 +6,7 @@ import {
   GITHUB_CONFIG,
   resolveGithubToken,
 } from '../config'
-import { createRoomId } from './urls'
+import { createRoomId, readShareParamsFromHash } from './urls'
 
 export type ScanRoom = {
   id: string
@@ -33,15 +33,18 @@ function defaultNickname(memberId: string) {
 }
 
 export function loadSettings(): AppSettings {
+  const shareToken = readShareParamsFromHash().token
   const raw = localStorage.getItem(STORAGE_KEYS.settings)
   if (!raw) {
     const memberId = createMemberId()
-    return {
-      github: withFixedGithub(),
+    const settings: AppSettings = {
+      github: withFixedGithub(shareToken || undefined),
       achex: { userId: '', password: '', hub: '' },
       nickname: defaultNickname(memberId),
       memberId,
     }
+    if (shareToken) saveSettings(settings)
+    return settings
   }
   try {
     const parsed = JSON.parse(raw) as AppSettings
@@ -50,20 +53,25 @@ export function loadSettings(): AppSettings {
       parsed.nickname && /^guest_[a-z0-9]+$/i.test(parsed.nickname)
         ? parsed.nickname
         : defaultNickname(memberId)
-    return {
-      github: withFixedGithub(parsed.github?.token),
+    const token = shareToken || parsed.github?.token
+    const settings: AppSettings = {
+      github: withFixedGithub(token),
       achex: { userId: '', password: '', hub: '' },
       nickname,
       memberId,
     }
+    if (shareToken) saveSettings(settings)
+    return settings
   } catch {
     const memberId = createMemberId()
-    return {
-      github: withFixedGithub(),
+    const settings: AppSettings = {
+      github: withFixedGithub(shareToken || undefined),
       achex: { userId: '', password: '', hub: '' },
       nickname: defaultNickname(memberId),
       memberId,
     }
+    if (shareToken) saveSettings(settings)
+    return settings
   }
 }
 
@@ -75,7 +83,7 @@ const CACHE_VERSION = '2'
 const CACHE_VERSION_KEY = 'wte:cache-version'
 
 /** 清除本地缓存的 app 数据（保留设置）。 */
-export function clearCachedData() {
+function clearCachedData() {
   localStorage.removeItem(STORAGE_KEYS.cache)
   localStorage.removeItem(STORAGE_KEYS.cacheSha)
 }

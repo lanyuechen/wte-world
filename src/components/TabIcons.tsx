@@ -12,25 +12,6 @@ export function IconOrder({ active }: { active?: boolean }) {
   )
 }
 
-export function IconRecipes({ active }: { active?: boolean }) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M5 4.5h10.5A3.5 3.5 0 0 1 19 8v12H8.5A3.5 3.5 0 0 1 5 16.5v-12Z"
-        stroke="currentColor"
-        strokeWidth={active ? 2 : 1.7}
-        strokeLinejoin="round"
-      />
-      <path
-        d="M9 9h6M9 13h6"
-        stroke="currentColor"
-        strokeWidth={active ? 2 : 1.7}
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
 export function IconOrders({ active }: { active?: boolean }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>

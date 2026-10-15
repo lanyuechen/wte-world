@@ -397,7 +397,6 @@ export function OrderPage() {
                   onOpen={() => setDetailRecipe(recipe)}
                   onAdd={() => toggleAddRecipe(recipe.id)}
                   index={index}
-                  variant="menu"
                 />
               ))}
             </div>

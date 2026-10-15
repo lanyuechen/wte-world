@@ -13,6 +13,10 @@ export function Layout() {
   const location = useLocation()
   const { session, mode } = useCollab()
   const onOrderPage = location.pathname === '/'
+  const onOrderDetail = /^\/orders\/[^/]+$/.test(location.pathname)
+  const onRecipeForm =
+    location.pathname === '/recipes/new' ||
+    /^\/recipes\/[^/]+\/edit$/.test(location.pathname)
   const onlineCount = Math.max(
     session.members.length,
     mode === 'idle' ? 0 : 1,
@@ -20,7 +24,11 @@ export function Layout() {
   const selectedCount = session.selectedRecipeIds.length
 
   return (
-    <div className={`app-shell ${onOrderPage ? 'is-order' : ''}`}>
+    <div
+      className={`app-shell ${onOrderPage ? 'is-order' : ''} ${
+        onRecipeForm ? 'is-form' : ''
+      } ${onOrderDetail ? 'is-order-detail' : ''}`}
+    >
       <div className="ambient" aria-hidden />
       <SyncBanner />
       <header className="topbar">
@@ -35,7 +43,11 @@ export function Layout() {
         )}
       </header>
 
-      <main className={`page ${onOrderPage ? 'page-order' : ''}`}>
+      <main
+        className={`page ${onOrderPage ? 'page-order' : ''} ${
+          onRecipeForm ? 'page-form' : ''
+        }`}
+      >
         <Outlet />
       </main>
 

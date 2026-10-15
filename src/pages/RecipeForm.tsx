@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -10,10 +10,12 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+type PickerKind = 'ingredients' | 'tags' | null
+
 export function RecipeFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { data, saveRecipe, thumbUrl } = useApp()
+  const { data, saveRecipe, thumbUrl, allIngredients } = useApp()
   const editing = data.recipes.find((r) => r.id === id)
   const isNew = !id || id === 'new'
   const fileRef = useRef<HTMLInputElement>(null)
@@ -22,11 +24,9 @@ export function RecipeFormPage() {
   const [ingredients, setIngredients] = useState<string[]>(
     editing?.ingredients ?? [],
   )
-  const [ingredientInput, setIngredientInput] = useState('')
-  const [addingIng, setAddingIng] = useState(false)
   const [tags, setTags] = useState<string[]>(editing?.tags ?? [])
-  const [tagInput, setTagInput] = useState('')
-  const [addingTag, setAddingTag] = useState(false)
+  const [picker, setPicker] = useState<PickerKind>(null)
+  const [draft, setDraft] = useState('')
   const [description, setDescription] = useState(editing?.description ?? '')
   const [descTab, setDescTab] = useState<'edit' | 'preview'>('edit')
   const [thumbnailPreview, setThumbnailPreview] = useState(
@@ -37,23 +37,59 @@ export function RecipeFormPage() {
 
   const cancelTo = '/'
 
-  const commitIngredient = () => {
-    const v = ingredientInput.trim()
-    if (v && !ingredients.includes(v)) {
-      setIngredients((prev) => [...prev, v])
-    }
-    setIngredientInput('')
-    setAddingIng(false)
+  const allTags = useMemo(() => {
+    const set = new Set<string>()
+    data.recipes.forEach((r) =>
+      r.tags.forEach((t) => {
+        const v = t.trim()
+        if (v) set.add(v)
+      }),
+    )
+    return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
+  }, [data.recipes])
+
+  const openPicker = (kind: PickerKind) => {
+    setDraft('')
+    setPicker(kind)
   }
 
-  const commitTag = () => {
-    const t = tagInput.trim()
-    if (t && !tags.includes(t)) {
-      setTags((prev) => [...prev, t])
-    }
-    setTagInput('')
-    setAddingTag(false)
+  const closePicker = () => {
+    setDraft('')
+    setPicker(null)
   }
+
+  const commitDraft = () => {
+    const v = draft.trim()
+    if (!v || !picker) {
+      closePicker()
+      return
+    }
+    if (picker === 'ingredients') {
+      setIngredients((prev) => (prev.includes(v) ? prev : [...prev, v]))
+    } else {
+      setTags((prev) => (prev.includes(v) ? prev : [...prev, v]))
+    }
+    setDraft('')
+  }
+
+  const toggleOption = (item: string) => {
+    if (picker === 'ingredients') {
+      setIngredients((prev) =>
+        prev.includes(item) ? prev.filter((i) => i !== item) : [...prev, item],
+      )
+    } else if (picker === 'tags') {
+      setTags((prev) =>
+        prev.includes(item) ? prev.filter((t) => t !== item) : [...prev, item],
+      )
+    }
+  }
+
+  const filteredOptions = useMemo(() => {
+    const q = draft.trim().toLowerCase()
+    const source = picker === 'ingredients' ? allIngredients : allTags
+    if (!q) return source
+    return source.filter((item) => item.toLowerCase().includes(q))
+  }, [picker, draft, allIngredients, allTags])
 
   const onPickImage = async (file: File | null) => {
     if (!file) return
@@ -88,21 +124,114 @@ export function RecipeFormPage() {
       createdAt: editing?.createdAt ?? nowIso(),
       updatedAt: nowIso(),
     }
-    // 乐观更新：本地先落盘并跳转，GitHub 后台保存
     saveRecipe(base, thumbnailDataUrl)
     navigate('/')
   }
 
-  return (
-    <section className="stack recipe-form-page">
-      <div className="form-hero">
-        <h1>{isNew ? '新建菜谱' : '编辑菜谱'}</h1>
-        <Link className="btn text" to={cancelTo}>
-          取消
-        </Link>
-      </div>
+  const renderAddControl = (
+    kind: 'ingredients' | 'tags',
+    label: string,
+  ) => {
+    if (picker === kind) {
+      return (
+        <input
+          className="chip-add-input"
+          autoFocus
+          placeholder={label}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitDraft()
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              closePicker()
+            }
+          }}
+        />
+      )
+    }
+    return (
+      <button
+        type="button"
+        className="chip chip-dashed"
+        onClick={() => openPicker(kind)}
+      >
+        + {label}
+      </button>
+    )
+  }
 
-      <form className="form-shell" onSubmit={onSubmit}>
+  const renderFloat = (
+    kind: 'ingredients' | 'tags',
+    title: string,
+    selected: string[],
+  ) => {
+    if (picker !== kind) return null
+    const canCreate =
+      draft.trim() &&
+      !selected.includes(draft.trim()) &&
+      !(kind === 'ingredients' ? allIngredients : allTags).includes(draft.trim())
+
+    return (
+      <div className="form-chip-float" role="dialog" aria-label={title}>
+        <div className="form-chip-float-head">
+          <h2>{title}</h2>
+          <button
+            type="button"
+            className="form-chip-float-close"
+            onClick={closePicker}
+          >
+            完成
+          </button>
+        </div>
+        {filteredOptions.length === 0 && !canCreate ? (
+          <p className="muted form-chip-float-empty">
+            {draft.trim() ? '没有匹配项，按回车添加' : '暂无历史项，直接输入添加'}
+          </p>
+        ) : (
+          <div className="chips form-chip-float-chips">
+            {filteredOptions.map((item) => {
+              const on = selected.includes(item)
+              return (
+                <button
+                  key={item}
+                  type="button"
+                  className={`chip ${on ? 'active' : ''}`}
+                  aria-pressed={on}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => toggleOption(item)}
+                >
+                  {item}
+                </button>
+              )
+            })}
+            {canCreate && (
+              <button
+                type="button"
+                className="chip chip-dashed"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={commitDraft}
+              >
+                + 添加「{draft.trim()}」
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <section className="recipe-form-page">
+      <div className="recipe-form-scroll">
+        <div className="form-hero">
+          <h1>{isNew ? '新建菜谱' : '编辑菜谱'}</h1>
+        </div>
+
+        <form id="recipe-form" className="form-shell" onSubmit={onSubmit}>
         <input
           ref={fileRef}
           type="file"
@@ -153,8 +282,34 @@ export function RecipeFormPage() {
         </label>
 
         <div
-          className="form-block rise-item"
+          className="form-block form-chip-field rise-item"
           style={{ animationDelay: '80ms' }}
+        >
+          <div className="form-block-head">
+            <span className="form-label">标签</span>
+            {tags.length > 0 && (
+              <span className="muted form-count">{tags.length}</span>
+            )}
+          </div>
+          <div className="chips form-chips">
+            {tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className="chip active"
+                onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
+              >
+                {tag} ×
+              </button>
+            ))}
+            {renderAddControl('tags', '添加标签')}
+          </div>
+          {renderFloat('tags', '已有标签', tags)}
+        </div>
+
+        <div
+          className="form-block form-chip-field rise-item"
+          style={{ animationDelay: '120ms' }}
         >
           <div className="form-block-head">
             <span className="form-label">食材</span>
@@ -175,87 +330,9 @@ export function RecipeFormPage() {
                 {ing} ×
               </button>
             ))}
-            {addingIng ? (
-              <input
-                className="chip-add-input"
-                autoFocus
-                placeholder="食材名"
-                value={ingredientInput}
-                onChange={(e) => setIngredientInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    commitIngredient()
-                  }
-                  if (e.key === 'Escape') {
-                    setIngredientInput('')
-                    setAddingIng(false)
-                  }
-                }}
-                onBlur={() => commitIngredient()}
-              />
-            ) : (
-              <button
-                type="button"
-                className="chip chip-dashed"
-                onClick={() => setAddingIng(true)}
-              >
-                + 添加食材
-              </button>
-            )}
+            {renderAddControl('ingredients', '添加食材')}
           </div>
-        </div>
-
-        <div
-          className="form-block rise-item"
-          style={{ animationDelay: '120ms' }}
-        >
-          <div className="form-block-head">
-            <span className="form-label">标签</span>
-            {tags.length > 0 && (
-              <span className="muted form-count">{tags.length}</span>
-            )}
-          </div>
-          <div className="chips form-chips">
-            {tags.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                className="chip active"
-                onClick={() => setTags((prev) => prev.filter((t) => t !== tag))}
-              >
-                {tag} ×
-              </button>
-            ))}
-            {addingTag ? (
-              <input
-                className="chip-add-input"
-                autoFocus
-                placeholder="标签名"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    commitTag()
-                  }
-                  if (e.key === 'Escape') {
-                    setTagInput('')
-                    setAddingTag(false)
-                  }
-                }}
-                onBlur={() => commitTag()}
-              />
-            ) : (
-              <button
-                type="button"
-                className="chip chip-dashed"
-                onClick={() => setAddingTag(true)}
-              >
-                + 添加标签
-              </button>
-            )}
-          </div>
+          {renderFloat('ingredients', '已有食材', ingredients)}
         </div>
 
         <div
@@ -263,7 +340,7 @@ export function RecipeFormPage() {
           style={{ animationDelay: '160ms' }}
         >
           <div className="form-block-head">
-            <span className="form-label">做法</span>
+            <span className="form-label">步骤</span>
             <div className="seg-tabs" role="tablist">
               <button
                 type="button"
@@ -298,12 +375,22 @@ export function RecipeFormPage() {
           )}
         </div>
 
-        {error && <p className="error-text">{error}</p>}
+          {error && <p className="error-text">{error}</p>}
+        </form>
+      </div>
 
-        <button className="btn primary btn-block form-submit" type="submit">
+      <div className="form-action-bar">
+        <Link className="form-action-cancel" to={cancelTo}>
+          取消
+        </Link>
+        <button
+          className="form-action-submit"
+          type="submit"
+          form="recipe-form"
+        >
           {isNew ? '创建菜谱' : '保存修改'}
         </button>
-      </form>
+      </div>
     </section>
   )
 }
