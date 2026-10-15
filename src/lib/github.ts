@@ -1,0 +1,196 @@
+import { Octokit } from '@octokit/rest'
+import type { AppData, GithubSettings } from '../types'
+import { EMPTY_APP_DATA, normalizeAppData } from '../types'
+import { APP_JSON_PATH, THUMBNAIL_DIR } from '../constants'
+
+function client(token: string) {
+  return new Octokit({ auth: token })
+}
+
+function assertConfigured(settings: GithubSettings) {
+  if (!settings.owner || !settings.repo || !settings.token) {
+    throw new Error('请先在设置中填写 GitHub owner、repo 与 Token')
+  }
+}
+
+function toGithubError(err: unknown): Error {
+  const status = (err as { status?: number })?.status
+  const message = String((err as { message?: string })?.message ?? '')
+  if (status === 401 || /bad credentials/i.test(message)) {
+    return new Error(
+      'GitHub Token 无效或已过期，请更新 src/config.ts 里的 SCAN_SHARE_TOKEN',
+    )
+  }
+  if (status === 403) {
+    return new Error('GitHub 权限不足，请检查 Token 对数据仓库的 Contents 读写权限')
+  }
+  if (status === 409 || status === 422) {
+    return new Error('远程数据已变更，请先同步再保存')
+  }
+  if (err instanceof Error) return err
+  return new Error(message || 'GitHub 请求失败')
+}
+
+export function thumbnailRawUrl(
+  settings: GithubSettings,
+  path: string,
+): string {
+  if (!path) return ''
+  if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('blob:')) {
+    return path
+  }
+  const clean = path.replace(/^\//, '')
+  return `https://raw.githubusercontent.com/${settings.owner}/${settings.repo}/${settings.branch}/${clean}`
+}
+
+export async function fetchAppData(settings: GithubSettings): Promise<{
+  data: AppData
+  sha: string | null
+  created: boolean
+}> {
+  assertConfigured(settings)
+  const octokit = client(settings.token)
+  try {
+    const res = await octokit.repos.getContent({
+      owner: settings.owner,
+      repo: settings.repo,
+      path: APP_JSON_PATH,
+      ref: settings.branch,
+    })
+    if (Array.isArray(res.data) || res.data.type !== 'file' || !('content' in res.data)) {
+      throw new Error('app.json 格式异常')
+    }
+    const content = decodeURIComponent(escape(atob(res.data.content.replace(/\n/g, ''))))
+    const parsed = JSON.parse(content) as AppData
+    return {
+      data: normalizeAppData({ ...EMPTY_APP_DATA, ...parsed }),
+      sha: res.data.sha,
+      created: false,
+    }
+  } catch (err: unknown) {
+    const status = (err as { status?: number })?.status
+    if (status === 404) {
+      const initial = { ...EMPTY_APP_DATA }
+      const { sha } = await putAppData(settings, initial, null)
+      return { data: initial, sha, created: true }
+    }
+    throw toGithubError(err)
+  }
+}
+
+export async function putAppData(
+  settings: GithubSettings,
+  data: AppData,
+  sha: string | null,
+): Promise<{ sha: string }> {
+  assertConfigured(settings)
+  const octokit = client(settings.token)
+  const content = btoa(
+    unescape(
+      encodeURIComponent(JSON.stringify(normalizeAppData(data), null, 2)),
+    ),
+  )
+  try {
+    const res = await octokit.repos.createOrUpdateFileContents({
+      owner: settings.owner,
+      repo: settings.repo,
+      path: APP_JSON_PATH,
+      message: `chore(wte): update app data ${new Date().toISOString()}`,
+      content,
+      branch: settings.branch,
+      ...(sha ? { sha } : {}),
+    })
+    const newSha = res.data.content?.sha
+    if (!newSha) throw new Error('写入成功但未返回 SHA')
+    return { sha: newSha }
+  } catch (err: unknown) {
+    throw toGithubError(err)
+  }
+}
+
+export async function uploadThumbnail(
+  settings: GithubSettings,
+  recipeId: string,
+  base64Jpeg: string,
+  existingSha?: string,
+): Promise<string> {
+  assertConfigured(settings)
+  const octokit = client(settings.token)
+  const path = `${THUMBNAIL_DIR}/${recipeId}.jpg`
+  const content = base64Jpeg.replace(/^data:image\/\w+;base64,/, '')
+
+  let sha = existingSha
+  if (!sha) {
+    try {
+      const existing = await octokit.repos.getContent({
+        owner: settings.owner,
+        repo: settings.repo,
+        path,
+        ref: settings.branch,
+      })
+      if (!Array.isArray(existing.data) && existing.data.type === 'file') {
+        sha = existing.data.sha
+      }
+    } catch {
+      // new file
+    }
+  }
+
+  try {
+    await octokit.repos.createOrUpdateFileContents({
+      owner: settings.owner,
+      repo: settings.repo,
+      path,
+      message: `chore(wte): thumbnail ${recipeId}`,
+      content,
+      branch: settings.branch,
+      ...(sha ? { sha } : {}),
+    })
+  } catch (err: unknown) {
+    throw toGithubError(err)
+  }
+
+  return path
+}
+
+export async function deleteThumbnail(
+  settings: GithubSettings,
+  path: string,
+): Promise<void> {
+  if (!path || path.startsWith('http') || path.startsWith('data:')) return
+  assertConfigured(settings)
+  const octokit = client(settings.token)
+  try {
+    const existing = await octokit.repos.getContent({
+      owner: settings.owner,
+      repo: settings.repo,
+      path,
+      ref: settings.branch,
+    })
+    if (Array.isArray(existing.data) || existing.data.type !== 'file') return
+    await octokit.repos.deleteFile({
+      owner: settings.owner,
+      repo: settings.repo,
+      path,
+      message: `chore(wte): remove thumbnail ${path}`,
+      sha: existing.data.sha,
+      branch: settings.branch,
+    })
+  } catch {
+    // best effort
+  }
+}
+
+export async function testConnection(settings: GithubSettings): Promise<string> {
+  assertConfigured(settings)
+  const octokit = client(settings.token)
+  try {
+    const repo = await octokit.repos.get({
+      owner: settings.owner,
+      repo: settings.repo,
+    })
+    return `已连接 ${repo.data.full_name}`
+  } catch (err: unknown) {
+    throw toGithubError(err)
+  }
+}
