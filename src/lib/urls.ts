@@ -1,4 +1,4 @@
-import { SCAN_SHARE_BASE } from '../config'
+import { getScanShareBase } from '../config'
 
 /** 从当前 hash 读取分享参数（不修改地址栏）。 */
 export function readShareParamsFromHash() {
@@ -14,7 +14,7 @@ export function readShareParamsFromHash() {
 
 /** 扫码页对外分享链接（带 token + room）。 */
 export function buildScanShareUrl(roomId: string, token: string) {
-  const base = SCAN_SHARE_BASE.replace(/\/$/, '')
+  const base = getScanShareBase().replace(/\/$/, '')
   const params = new URLSearchParams()
   const t = token.trim()
   if (t) params.set('token', t)

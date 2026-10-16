@@ -5,8 +5,18 @@ export const GITHUB_CONFIG = {
   branch: 'master',
 } as const
 
-/** 扫码分享用的站点入口（GitHub Pages）。 */
-export const SCAN_SHARE_BASE = 'https://lanyuechen.github.io/wte-world/'
+/**
+ * 扫码分享用的站点入口：跟当前访问域名走。
+ * 开发如 http://localhost:5173/ ，线上如 https://lanyuechen.github.io/wte-world/
+ */
+export function getScanShareBase() {
+  if (typeof window === 'undefined') {
+    return 'https://lanyuechen.github.io/wte-world/'
+  }
+  const { origin, pathname } = window.location
+  const dir = pathname.replace(/index\.html$/i, '').replace(/\/?$/, '/')
+  return `${origin}${dir}`
+}
 
 /**
  * WebRTC 信令：EMQX 公共 MQTT（国内接入点）。

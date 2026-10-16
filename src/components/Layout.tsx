@@ -21,6 +21,8 @@ export function Layout() {
     session.members.length,
     mode === 'idle' ? 0 : 1,
   )
+  const linkLabel =
+    mode === 'webrtc' ? 'P2P' : mode === 'mqtt' ? '信令' : '未连接'
   const selectedCount = session.selectedRecipeIds.length
 
   return (
@@ -42,10 +44,22 @@ export function Layout() {
         </p>
         {onOrderPage && (
           <span
-            className={`topbar-online ${mode === 'idle' ? 'is-idle' : 'is-live'}`}
+            className={`topbar-online ${
+              mode === 'idle' ? 'is-idle' : mode === 'webrtc' ? 'is-p2p' : 'is-live'
+            }`}
+            title={
+              mode === 'webrtc'
+                ? 'WebRTC 已连通，点单可实时同步'
+                : mode === 'mqtt'
+                  ? '已连信令，等待 WebRTC'
+                  : '未连接'
+            }
           >
             <i className="live-dot" aria-hidden />
             {onlineCount} 人在线
+            <span className="topbar-link-mode" aria-label={`连接 ${linkLabel}`}>
+              · {linkLabel}
+            </span>
           </span>
         )}
       </header>

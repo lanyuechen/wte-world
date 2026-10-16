@@ -17,7 +17,7 @@ type AppMessage =
       peer: { id: string; nickname: string }
       roomId: string
     }
-  | { type: 'session'; session: CollabSession }
+  | { type: 'session'; session: CollabSession; sync?: boolean }
   | { type: 'offer'; description: RTCSessionDescriptionInit }
   | { type: 'answer'; description: RTCSessionDescriptionInit }
   | {
@@ -28,9 +28,20 @@ type AppMessage =
       }
     }
 
+/** STUN + 公共 TURN（Open Relay，仅作连通性兜底，不保证长期可用） */
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun.voipbuster.com:3478' },
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
 
 export function createEmptySession(roomId: string): CollabSession {
@@ -108,7 +119,8 @@ export class CollabRoom {
       ...createEmptySession(roomId),
       ...initial,
       members: [],
-      revisedAt: Date.now(),
+      // 进房尚未本地编辑：不抢房内已有点单的 revisedAt
+      revisedAt: 0,
     }
 
     void this.signal.joinRoom(roomId, nickname, {
@@ -177,7 +189,15 @@ export class CollabRoom {
 
   /** 业务 session 只走 WebRTC，MQTT 仅信令 */
   private publishSession() {
-    const payload: AppMessage = { type: 'session', session: this.session }
+    this.sendSession(false)
+  }
+
+  private sendSession(sync: boolean) {
+    const payload: AppMessage = {
+      type: 'session',
+      session: this.session,
+      ...(sync ? { sync: true } : {}),
+    }
     let sentViaRtc = false
     for (const channel of this.channels.values()) {
       if (channel.readyState === 'open') {
@@ -203,9 +223,7 @@ export class CollabRoom {
     }
 
     if (message.type === 'session') {
-      if (message.session.revisedAt >= this.session.revisedAt) {
-        this.applyRemoteSession(message.session)
-      }
+      this.ingestRemoteSession(message.session, Boolean(message.sync))
       return
     }
 
@@ -241,6 +259,27 @@ export class CollabRoom {
       } catch {
         // ignore race
       }
+    }
+  }
+
+  /**
+   * sync：DataChannel 刚通时的快照交换——空点单不能盖掉已有订单，本机为空则接受对端订单。
+   * 普通更新仍按 revisedAt 最后写入胜出（含故意清空点单）。
+   */
+  private ingestRemoteSession(remote: CollabSession, isSync: boolean) {
+    const localHasOrder = this.session.selectedRecipeIds.length > 0
+    const remoteHasOrder = remote.selectedRecipeIds.length > 0
+
+    if (isSync) {
+      if (!localHasOrder && remoteHasOrder) {
+        this.applyRemoteSession(remote)
+        return
+      }
+      if (localHasOrder && !remoteHasOrder) return
+    }
+
+    if (remote.revisedAt >= this.session.revisedAt) {
+      this.applyRemoteSession(remote)
     }
   }
 
@@ -315,12 +354,14 @@ export class CollabRoom {
     this.channels.set(remoteId, channel)
     channel.onopen = () => {
       this.setMode('webrtc')
-      // DataChannel 就绪后同步当前点单状态（不经 MQTT）
+      // 有已选菜才推快照；空点单新人静默等待，避免盖掉房内菜单
+      if (this.session.selectedRecipeIds.length === 0) return
       try {
         channel.send(
           JSON.stringify({
             type: 'session',
             session: this.session,
+            sync: true,
           } satisfies AppMessage),
         )
       } catch {

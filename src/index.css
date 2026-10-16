@@ -306,8 +306,31 @@ body:has(.app-shell.is-form) {
   background: #6fdf9a;
 }
 
+.topbar-online.is-p2p {
+  color: rgba(120, 220, 200, 0.98);
+}
+
+.topbar-online.is-p2p .live-dot {
+  background: #5ce0c8;
+}
+
 .topbar-online.is-idle .live-dot {
   background: rgba(255, 255, 255, 0.35);
+}
+
+.topbar-link-mode {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.topbar-online.is-idle .topbar-link-mode {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.topbar-online.is-p2p .topbar-link-mode {
+  color: rgba(160, 235, 220, 0.9);
 }
 
 .page {
