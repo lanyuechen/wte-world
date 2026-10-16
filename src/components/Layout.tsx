@@ -32,7 +32,14 @@ export function Layout() {
       <div className="ambient" aria-hidden />
       <SyncBanner />
       <header className="topbar">
-        <p className="brand">吃什么</p>
+        <p className="brand">
+          <span className="brand-mark">
+            吃什么
+            <span className="brand-version" aria-label={`版本 ${__APP_VERSION__}`}>
+              v{__APP_VERSION__}
+            </span>
+          </span>
+        </p>
         {onOrderPage && (
           <span
             className={`topbar-online ${mode === 'idle' ? 'is-idle' : 'is-live'}`}

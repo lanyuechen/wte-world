@@ -9,6 +9,14 @@ export const GITHUB_CONFIG = {
 export const SCAN_SHARE_BASE = 'https://lanyuechen.github.io/wte-world/'
 
 /**
+ * 下厨房导入用的 CORS 代理（可选）。
+ * 本地 `npm run dev` 已内置 Vite 代理，可不填。
+ * 部署到 GitHub Pages 时，可填 Cloudflare Worker 地址，例如：
+ * `https://xcf-proxy.xxx.workers.dev/`（需带 `?u=` 查询参数约定，见 workers/xcf-proxy）
+ */
+export const XCF_PROXY_URL = ''
+
+/**
  * WebRTC 信令：EMQX 公共 MQTT（国内接入点）。
  * @see https://www.emqx.com/zh/mqtt/public-mqtt5-broker
  * 仅传 offer/answer/candidate/进房信令，勿传 Token 等敏感数据。
