@@ -1,10 +1,4 @@
-import type {
-  CollabSession,
-  FilterMode,
-  IngredientStatus,
-  Order,
-  Recipe,
-} from '../types'
+import type { CollabSession, Order } from '../types'
 import { MqttSignalClient } from './mqtt-signal'
 
 /** idle：未连；mqtt：MQTT 已连（点单可走 MQTT 兜底）；webrtc：DataChannel 已通 */
@@ -14,7 +8,7 @@ const PEER_RETRY_MAX = 3
 const MQTT_RECONNECT_BASE_MS = 1200
 const MQTT_RECONNECT_MAX_MS = 15_000
 
-export type CollabEvents = {
+type CollabEvents = {
   onSession: (session: CollabSession) => void
   onMembers: (members: CollabSession['members']) => void
   onStatus: (mode: CollabTransportMode) => void
@@ -70,45 +64,6 @@ export function createEmptySession(roomId: string): CollabSession {
     members: [],
     revisedAt: Date.now(),
   }
-}
-
-export function filterRecipes(
-  recipes: Recipe[],
-  available: string[],
-  mode: FilterMode,
-  query: string,
-  tags: string[],
-): Recipe[] {
-  const availableSet = new Set(available)
-  const q = query.trim().toLowerCase()
-  return recipes.filter((recipe) => {
-    if (q && !recipe.name.toLowerCase().includes(q)) return false
-    if (tags.length && !tags.every((t) => recipe.tags.includes(t))) return false
-    if (available.length === 0) return true
-    if (mode === 'all') {
-      return recipe.ingredients.every((ing) => availableSet.has(ing))
-    }
-    return recipe.ingredients.some((ing) => availableSet.has(ing))
-  })
-}
-
-export function buildIngredientStatus(
-  recipes: Recipe[],
-  recipeIds: string[],
-  available: string[],
-  prev: Record<string, IngredientStatus> = {},
-): Record<string, IngredientStatus> {
-  const availableSet = new Set(available)
-  const names = new Set<string>()
-  for (const id of recipeIds) {
-    const recipe = recipes.find((r) => r.id === id)
-    recipe?.ingredients.forEach((ing) => names.add(ing))
-  }
-  const next: Record<string, IngredientStatus> = {}
-  for (const name of names) {
-    next[name] = prev[name] ?? (availableSet.has(name) ? 'have' : 'need')
-  }
-  return next
 }
 
 export class CollabRoom {

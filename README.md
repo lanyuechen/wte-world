@@ -1,6 +1,6 @@
 # 吃什么
 
-React + Vite 网页小应用：菜谱管理、按手头食材点单、订单采购清单，数据存 GitHub；固定二维码协同点单（Achex 信令 + WebRTC）。
+React + Vite 网页小应用：菜谱管理、按手头食材点单、订单采购清单。数据存 GitHub；协同点单走 EMQX 公共 MQTT（信令 / 兜底）+ WebRTC DataChannel。
 
 ## 开发
 
@@ -11,7 +11,7 @@ npm run dev
 
 ## 配置
 
-仓库、协同房间号、Achex、分享地址写在 [`src/config.ts`](src/config.ts)。
+GitHub 仓库与 MQTT 写在 [`src/config.ts`](src/config.ts)。分享链接跟当前访问域名走（本地 / GitHub Pages）。
 
 **不要把 GitHub Token 提交进仓库**（提交后会被 GitHub 立刻吊销）。首次打开会提示输入 Token 并写入 localStorage；扫码页二维码会带上 Token，家人扫码后自动写入本机。
 
@@ -26,7 +26,7 @@ npm run dev
 | GitHub Pages | https://lanyuechen.github.io/wte-world/ |
 | jsDelivr CDN | https://cdn.jsdelivr.net/gh/lanyuechen/wte-world@gh-pages/index.html |
 
-扫码分享默认使用 jsDelivr 入口。生产构建启用 Service Worker，会预缓存应用资源，并对 `cdn.jsdelivr.net`、GitHub Raw 图片做运行时缓存。
+生产构建启用 Service Worker，会预缓存应用资源，并对 jsDelivr、GitHub Raw 图片做运行时缓存。
 
 本地预览生产包：
 

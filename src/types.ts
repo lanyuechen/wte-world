@@ -25,7 +25,6 @@ export type AppData = {
   recipes: Recipe[]
   orders: Order[]
   availableIngredients: string[]
-  collabRoomId: string
 }
 
 type CollabMember = {
@@ -50,15 +49,8 @@ export type GithubSettings = {
   token: string
 }
 
-type AchexSettings = {
-  userId: string
-  password: string
-  hub: string
-}
-
 export type AppSettings = {
   github: GithubSettings
-  achex: AchexSettings
   nickname: string
   memberId: string
 }
@@ -67,15 +59,13 @@ export const EMPTY_APP_DATA: AppData = {
   recipes: [],
   orders: [],
   availableIngredients: [],
-  collabRoomId: 'wte-home',
 }
 
-/** 规范化远程/缓存数据，去掉已废弃字段（如 customTags）。 */
+/** 规范化远程/缓存数据，去掉已废弃字段。 */
 export function normalizeAppData(data: Partial<AppData> | null | undefined): AppData {
   return {
     recipes: data?.recipes ?? [],
     orders: data?.orders ?? [],
     availableIngredients: data?.availableIngredients ?? [],
-    collabRoomId: data?.collabRoomId || 'wte-home',
   }
 }

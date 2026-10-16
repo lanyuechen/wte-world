@@ -4,23 +4,12 @@ import { STORAGE_KEYS } from '../constants'
 import { GITHUB_CONFIG, resolveGithubToken } from '../config'
 import { createRoomId, readShareParamsFromHash } from './urls'
 
+const LEGACY_SCAN_ROOMS_KEY = 'wte:scan-rooms'
+
 function notifyActiveRoom(roomId: string) {
   window.dispatchEvent(
     new CustomEvent('wte:active-room', { detail: { roomId } }),
   )
-}
-
-/** 兼容旧版多扫码房间列表，仅用于首次迁移。 */
-function readLegacyScanRoomId() {
-  const raw = localStorage.getItem(STORAGE_KEYS.scanRooms)
-  if (!raw) return ''
-  try {
-    const parsed = JSON.parse(raw) as { id?: string }[]
-    const id = Array.isArray(parsed) ? parsed[0]?.id?.trim() : ''
-    return id || ''
-  } catch {
-    return ''
-  }
 }
 
 function createMemberId() {
@@ -41,44 +30,38 @@ function defaultNickname(memberId: string) {
   return `guest_${memberId.replace(/-/g, '').slice(0, 8)}`
 }
 
+function buildSettings(token?: string, memberId = createMemberId()): AppSettings {
+  return {
+    github: withFixedGithub(token),
+    nickname: defaultNickname(memberId),
+    memberId,
+  }
+}
+
 export function loadSettings(): AppSettings {
   const shareToken = readShareParamsFromHash().token
   const raw = localStorage.getItem(STORAGE_KEYS.settings)
   if (!raw) {
-    const memberId = createMemberId()
-    const settings: AppSettings = {
-      github: withFixedGithub(shareToken || undefined),
-      achex: { userId: '', password: '', hub: '' },
-      nickname: defaultNickname(memberId),
-      memberId,
-    }
+    const settings = buildSettings(shareToken || undefined)
     if (shareToken) saveSettings(settings)
     return settings
   }
   try {
-    const parsed = JSON.parse(raw) as AppSettings
+    const parsed = JSON.parse(raw) as Partial<AppSettings>
     const memberId = parsed.memberId || createMemberId()
     const nickname =
       parsed.nickname && /^guest_[a-z0-9]+$/i.test(parsed.nickname)
         ? parsed.nickname
         : defaultNickname(memberId)
-    const token = shareToken || parsed.github?.token
     const settings: AppSettings = {
-      github: withFixedGithub(token),
-      achex: { userId: '', password: '', hub: '' },
+      github: withFixedGithub(shareToken || parsed.github?.token),
       nickname,
       memberId,
     }
     if (shareToken) saveSettings(settings)
     return settings
   } catch {
-    const memberId = createMemberId()
-    const settings: AppSettings = {
-      github: withFixedGithub(shareToken || undefined),
-      achex: { userId: '', password: '', hub: '' },
-      nickname: defaultNickname(memberId),
-      memberId,
-    }
+    const settings = buildSettings(shareToken || undefined)
     if (shareToken) saveSettings(settings)
     return settings
   }
@@ -88,17 +71,15 @@ export function saveSettings(settings: AppSettings) {
   localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings))
 }
 
-const CACHE_VERSION = '2'
+const CACHE_VERSION = '3'
 const CACHE_VERSION_KEY = 'wte:cache-version'
 
-/** 清除本地缓存的 app 数据（保留设置）。 */
 function clearCachedData() {
   localStorage.removeItem(STORAGE_KEYS.cache)
   localStorage.removeItem(STORAGE_KEYS.cacheSha)
 }
 
 export function loadCachedData(): { data: AppData; sha: string | null } {
-  // 去掉 demo 后升级版本，丢弃旧本地缓存
   if (localStorage.getItem(CACHE_VERSION_KEY) !== CACHE_VERSION) {
     clearCachedData()
     localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION)
@@ -132,10 +113,17 @@ export function loadActiveRoomId() {
   const stored = localStorage.getItem(STORAGE_KEYS.activeRoom)?.trim()
   if (stored) return stored
 
-  const legacy = readLegacyScanRoomId()
-  if (legacy) {
-    localStorage.removeItem(STORAGE_KEYS.scanRooms)
-    return saveActiveRoomId(legacy)
+  // 兼容极旧版多房间列表：取第一项后清掉
+  const legacyRaw = localStorage.getItem(LEGACY_SCAN_ROOMS_KEY)
+  if (legacyRaw) {
+    localStorage.removeItem(LEGACY_SCAN_ROOMS_KEY)
+    try {
+      const parsed = JSON.parse(legacyRaw) as { id?: string }[]
+      const id = Array.isArray(parsed) ? parsed[0]?.id?.trim() : ''
+      if (id) return saveActiveRoomId(id)
+    } catch {
+      // ignore
+    }
   }
 
   return saveActiveRoomId(createRoomId())
@@ -150,7 +138,7 @@ export function saveActiveRoomId(roomId: string) {
 /** 重新生成协同房间号（扫码页「更新」），并通知协同层重连。 */
 export function regenerateActiveRoomId() {
   const id = saveActiveRoomId(createRoomId())
-  localStorage.removeItem(STORAGE_KEYS.scanRooms)
+  localStorage.removeItem(LEGACY_SCAN_ROOMS_KEY)
   notifyActiveRoom(id)
   return id
 }

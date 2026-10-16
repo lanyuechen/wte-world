@@ -5,7 +5,7 @@
 import mqtt, { type MqttClient } from 'mqtt'
 import { MQTT_SIGNAL_CONFIG } from '../config'
 
-export type SignalEnvelope = {
+type SignalEnvelope = {
   from: string
   nickname: string
   roomId: string
@@ -187,15 +187,6 @@ export class MqttSignalClient {
       peer: { id: this.clientId, nickname: this.nickname },
       roomId: this.roomId,
     })
-  }
-
-  broadcast(message: unknown) {
-    this.publishRaw(this.lobbyTopic(), {
-      from: this.clientId,
-      nickname: this.nickname,
-      roomId: this.roomId,
-      message,
-    } satisfies SignalEnvelope)
   }
 
   sendTo(sessionId: string, message: unknown) {

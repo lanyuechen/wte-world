@@ -3,7 +3,6 @@ export const STORAGE_KEYS = {
   cache: 'wte:app-data',
   cacheSha: 'wte:app-data-sha',
   activeRoom: 'wte:active-room',
-  scanRooms: 'wte:scan-rooms',
 } as const
 
 export const APP_JSON_PATH = 'data/app.json'

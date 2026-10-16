@@ -92,7 +92,6 @@ export function Layout() {
         onRecipeForm ? 'is-form' : ''
       } ${onOrderDetail ? 'is-order-detail' : ''}`}
     >
-      <div className="ambient" aria-hidden />
       <header className="topbar">
         <p className="brand">
           <span className="brand-mark">

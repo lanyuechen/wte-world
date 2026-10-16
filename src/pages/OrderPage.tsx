@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
 import { RecipeCard } from '../components/RecipeCard'
 import { RecipeSheet } from '../components/RecipeSheet'
-import { buildIngredientStatus, filterRecipes } from '../lib/collab'
+import { buildIngredientStatus, filterRecipes } from '../lib/recipes'
 import type { CollabSession, FilterMode, Order, Recipe } from '../types'
 
 const ALL_CATEGORY = '全部'
@@ -533,7 +533,7 @@ export function OrderPage() {
       <div className="order-cart-bar">
         <button
           type="button"
-          className={`order-cart-info ${cartOpen ? 'is-open' : ''}`}
+          className="order-cart-info"
           disabled={!session.selectedRecipeIds.length}
           aria-expanded={cartOpen}
           onClick={() => {

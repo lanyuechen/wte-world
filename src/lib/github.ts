@@ -44,13 +44,12 @@ export function thumbnailRawUrl(
   return `https://testingcf.jsdelivr.net/gh/${settings.owner}/${settings.repo}@${settings.branch}/${clean}`
 }
 
-/** 上传约定路径：assets/thumbnails/{recipeId}.jpg */
-export function thumbnailPathForRecipe(recipeId: string) {
+function thumbnailPathForRecipe(recipeId: string) {
   return `${THUMBNAIL_DIR}/${recipeId}.jpg`
 }
 
 /** 把 thumbnail 字段（相对路径或 CDN/raw URL）收成仓库内路径，供删除用。 */
-export function normalizeThumbnailRepoPath(path: string): string {
+function normalizeThumbnailRepoPath(path: string): string {
   const raw = path.trim()
   if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return ''
   if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
@@ -179,7 +178,7 @@ export async function uploadThumbnail(
   return path
 }
 
-export async function deleteThumbnail(
+async function deleteThumbnail(
   settings: GithubSettings,
   pathOrUrl: string,
 ): Promise<void> {

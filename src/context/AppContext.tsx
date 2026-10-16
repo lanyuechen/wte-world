@@ -23,23 +23,19 @@ import { loadCachedData, loadSettings, saveCachedData, saveSettings } from '../l
 type Status = {
   syncing: boolean
   error: string
-  /** 顶部条重试行为：写回 / 拉取 */
+  /** 失败后可重试：写回 / 拉取 */
   retry: 'persist' | 'sync' | null
 }
 
 type AppContextValue = {
   data: AppData
   settings: AppSettings
-  sha: string | null
   status: Status
-  configured: boolean
   thumbUrl: (path: string) => string
-  setSettings: (next: AppSettings) => void
   applyGithubToken: (token: string) => Promise<void>
   syncFromRemote: () => Promise<void>
   saveRecipe: (recipe: Recipe, thumbnailDataUrl?: string | null) => void
   removeRecipe: (id: string) => void
-  setAvailableIngredients: (list: string[]) => void
   saveOrder: (order: Order, availableIngredients?: string[]) => void
   /** 协同端收到他人生成的订单：只写本地，不触发 GitHub */
   applyRemoteOrder: (order: Order, availableIngredients?: string[]) => void
@@ -142,20 +138,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       resolveGithubToken(settings.github.token) &&
       !GITHUB_CONFIG.owner.startsWith('YOUR_'),
   )
-
-  const setSettings = useCallback((next: AppSettings) => {
-    const merged: AppSettings = {
-      ...next,
-      github: {
-        owner: GITHUB_CONFIG.owner,
-        repo: GITHUB_CONFIG.repo,
-        branch: GITHUB_CONFIG.branch,
-        token: resolveGithubToken(next.github.token),
-      },
-    }
-    setSettingsState(merged)
-    saveSettings(merged)
-  }, [])
 
   const runPersist = useCallback(async () => {
     if (flushingRef.current) return
@@ -346,13 +328,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [commit],
   )
 
-  const setAvailableIngredients = useCallback(
-    (list: string[]) => {
-      commit((prev) => ({ ...prev, availableIngredients: list }))
-    },
-    [commit],
-  )
-
   const saveOrder = useCallback(
     (order: Order, availableIngredients?: string[]) => {
       commit((prev) => {
@@ -413,16 +388,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value: AppContextValue = {
     data: data ?? EMPTY_APP_DATA,
     settings,
-    sha,
     status,
-    configured,
     thumbUrl,
-    setSettings,
     applyGithubToken,
     syncFromRemote,
     saveRecipe,
     removeRecipe,
-    setAvailableIngredients,
     saveOrder,
     applyRemoteOrder,
     removeOrder,

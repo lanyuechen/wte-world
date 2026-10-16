@@ -19,9 +19,9 @@ export function getScanShareBase() {
 }
 
 /**
- * WebRTC 信令：EMQX 公共 MQTT（国内接入点）。
+ * EMQX 公共 MQTT（国内接入点）：WebRTC 信令 + P2P 未通时的点单中继。
  * @see https://www.emqx.com/zh/mqtt/public-mqtt5-broker
- * 仅传 offer/answer/candidate/进房信令，勿传 Token 等敏感数据。
+ * 勿传 Token 等敏感数据。
  */
 export const MQTT_SIGNAL_CONFIG = {
   url: 'wss://broker-cn.emqx.io:8084/mqtt',

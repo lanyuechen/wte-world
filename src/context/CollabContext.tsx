@@ -34,8 +34,11 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const { settings, applyRemoteOrder } = useApp()
   const roomRef = useRef<CollabRoom | null>(null)
   const applyRemoteOrderRef = useRef(applyRemoteOrder)
-  applyRemoteOrderRef.current = applyRemoteOrder
   const [roomId, setRoomId] = useState(() => loadActiveRoomId())
+
+  useEffect(() => {
+    applyRemoteOrderRef.current = applyRemoteOrder
+  }, [applyRemoteOrder])
   const [session, setSession] = useState<CollabSession>(() =>
     createEmptySession(roomId),
   )
