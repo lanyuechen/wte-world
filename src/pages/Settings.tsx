@@ -1,68 +1,68 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { useApp } from '../context/AppContext'
-import {
-  createScanRoom,
-  loadScanRooms,
-  saveScanRooms,
-  type ScanRoom,
-} from '../lib/storage'
+import { useCollab } from '../context/CollabContext'
+import { regenerateActiveRoomId } from '../lib/storage'
 import { buildScanShareUrl } from '../lib/urls'
 
-function CloseIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.setAttribute('readonly', '')
+      el.style.position = 'fixed'
+      el.style.left = '-9999px'
+      document.body.appendChild(el)
+      el.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(el)
+      return ok
+    } catch {
+      return false
+    }
+  }
 }
 
 export function SettingsPage() {
   const { settings } = useApp()
+  const { roomId } = useCollab()
   const token = settings.github.token.trim()
-  const [rooms, setRooms] = useState<ScanRoom[]>(() => loadScanRooms())
-  const [qrMap, setQrMap] = useState<Record<string, string>>({})
+  const [qrDataUrl, setQrDataUrl] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const shareUrl = buildScanShareUrl(roomId, token)
 
   useEffect(() => {
     let cancelled = false
+    setQrDataUrl('')
     void (async () => {
-      const entries = await Promise.all(
-        rooms.map(async (room) => {
-          const dataUrl = await QRCode.toDataURL(
-            buildScanShareUrl(room.id, token),
-            {
-              width: 320,
-              margin: 1,
-              errorCorrectionLevel: 'M',
-              color: { dark: '#12261d', light: '#fffdf8' },
-            },
-          )
-          return [room.id, dataUrl] as const
-        }),
-      )
-      if (!cancelled) {
-        setQrMap(Object.fromEntries(entries))
-      }
+      const dataUrl = await QRCode.toDataURL(shareUrl, {
+        width: 320,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#12261d', light: '#fffdf8' },
+      })
+      if (!cancelled) setQrDataUrl(dataUrl)
     })()
     return () => {
       cancelled = true
     }
-  }, [rooms, token])
+  }, [shareUrl])
 
-  const newRoom = () => {
-    createScanRoom(`房间 ${rooms.length + 1}`)
-    setRooms(loadScanRooms())
+  const copyLink = async () => {
+    const ok = await copyText(shareUrl)
+    if (!ok) return
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1600)
   }
 
-  const removeRoom = (roomId: string) => {
-    const next = rooms.filter((r) => r.id !== roomId)
-    saveScanRooms(next)
-    setRooms(next)
+  const updateRoom = () => {
+    setCopied(false)
+    regenerateActiveRoomId()
   }
 
   return (
@@ -71,41 +71,26 @@ export function SettingsPage() {
       <h1 className="scan-brand">吃什么</h1>
       <p className="scan-lead">扫一下，一起勾选今天的菜</p>
 
-      <div className="scan-qr-grid">
-        {rooms.map((room) => (
-          <div key={room.id} className="scan-qr-card">
-            <div className="scan-qr-frame">
-              {qrMap[room.id] ? (
-                <img
-                  className="qr poster"
-                  src={qrMap[room.id]}
-                  alt={`${room.label}二维码`}
-                />
-              ) : (
-                <div className="thumb-placeholder large">生成中…</div>
-              )}
-              <button
-                type="button"
-                className="scan-qr-delete"
-                aria-label={`删除${room.label}`}
-                onClick={() => removeRoom(room.id)}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-            <p className="scan-qr-label">{room.label}</p>
-          </div>
-        ))}
-
-        <button
-          type="button"
-          className="scan-qr-create"
-          onClick={newRoom}
-          aria-label="新建房间"
-        >
-          <span className="scan-qr-create-plus">+</span>
-          <span>新建房间</span>
-        </button>
+      <div className="scan-qr-card">
+        <div className="scan-qr-frame">
+          {qrDataUrl ? (
+            <img className="qr poster" src={qrDataUrl} alt="共享点单二维码" />
+          ) : (
+            <div className="thumb-placeholder large">生成中…</div>
+          )}
+        </div>
+        <div className="scan-qr-actions">
+          <button
+            type="button"
+            className={`scan-qr-copy ${copied ? 'is-copied' : ''}`}
+            onClick={() => void copyLink()}
+          >
+            {copied ? '已复制' : '复制链接'}
+          </button>
+          <button type="button" className="scan-qr-update" onClick={updateRoom}>
+            更新
+          </button>
+        </div>
       </div>
 
       <p className="scan-hint">打开手机摄像头或浏览器扫码即可进点单</p>

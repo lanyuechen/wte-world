@@ -1,7 +1,8 @@
 import type { CollabSession, FilterMode, IngredientStatus, Recipe } from '../types'
-import { AchexClient } from './achex'
+import { MqttSignalClient } from './mqtt-signal'
 
-export type CollabTransportMode = 'idle' | 'achex' | 'webrtc' | 'achex-relay'
+/** idle：信令未连上；mqtt：信令已连；webrtc：DataChannel 已通（业务走 P2P） */
+export type CollabTransportMode = 'idle' | 'mqtt' | 'webrtc'
 
 export type CollabEvents = {
   onSession: (session: CollabSession) => void
@@ -88,7 +89,7 @@ export class CollabRoom {
   private nickname: string
   private clientId = ''
   private events: CollabEvents
-  private achex = new AchexClient()
+  private signal = new MqttSignalClient()
   private peers = new Map<string, RTCPeerConnection>()
   private channels = new Map<string, RTCDataChannel>()
   private session: CollabSession
@@ -110,42 +111,41 @@ export class CollabRoom {
       revisedAt: Date.now(),
     }
 
-    void this.achex
-      .joinRoom(roomId, nickname, {
-        onJoined: ({ clientId, peers }) => {
-          this.clientId = clientId
-          this.session = {
-            ...this.session,
-            members: [
-              { id: clientId, name: nickname },
-              ...peers.map((p) => ({ id: p.id, name: p.nickname })),
-            ],
-          }
-          this.events.onMembers(this.session.members)
-          this.events.onSession(this.session)
-          this.setMode('achex')
-          for (const peer of peers) {
-            void this.ensurePeer(peer.id, true)
-          }
-        },
-        onPeerLeave: (peer) => {
-          this.session = {
-            ...this.session,
-            members: this.session.members.filter((m) => m.id !== peer.id),
-          }
-          this.events.onMembers(this.session.members)
-          this.closePeer(peer.id)
-        },
-        onMessage: (message, fromSessionId) => {
-          void this.handleAppMessage(message as AppMessage, fromSessionId)
-        },
-        onClose: () => {
-          if (!this.destroyed) this.setMode('idle')
-        },
-        onError: (message) => {
-          if (!this.destroyed) this.events.onError(message)
-        },
-      })
+    void this.signal.joinRoom(roomId, nickname, {
+      onJoined: ({ clientId, peers }) => {
+        this.clientId = clientId
+        this.session = {
+          ...this.session,
+          members: [
+            { id: clientId, name: nickname },
+            ...peers.map((p) => ({ id: p.id, name: p.nickname })),
+          ],
+        }
+        this.events.onMembers(this.session.members)
+        this.events.onSession(this.session)
+        this.setMode('mqtt')
+        for (const peer of peers) {
+          void this.ensurePeer(peer.id, true)
+        }
+      },
+      onPeerLeave: (peer) => {
+        this.session = {
+          ...this.session,
+          members: this.session.members.filter((m) => m.id !== peer.id),
+        }
+        this.events.onMembers(this.session.members)
+        this.closePeer(peer.id)
+      },
+      onMessage: (message, fromSessionId) => {
+        void this.handleAppMessage(message as AppMessage, fromSessionId)
+      },
+      onClose: () => {
+        if (!this.destroyed) this.setMode('idle')
+      },
+      onError: (message) => {
+        if (!this.destroyed) this.events.onError(message)
+      },
+    })
   }
 
   getSession() {
@@ -168,13 +168,14 @@ export class CollabRoom {
     for (const pc of this.peers.values()) pc.close()
     this.peers.clear()
     this.channels.clear()
-    this.achex.close()
+    this.signal.close()
   }
 
   private setMode(mode: CollabTransportMode) {
     this.events.onStatus(mode)
   }
 
+  /** 业务 session 只走 WebRTC，MQTT 仅信令 */
   private publishSession() {
     const payload: AppMessage = { type: 'session', session: this.session }
     let sentViaRtc = false
@@ -184,12 +185,8 @@ export class CollabRoom {
         sentViaRtc = true
       }
     }
-    if (sentViaRtc) {
-      this.setMode('webrtc')
-    } else {
-      this.achex.broadcast(payload)
-      this.setMode('achex-relay')
-    }
+    if (sentViaRtc) this.setMode('webrtc')
+    else if (this.signal.isOpen) this.setMode('mqtt')
   }
 
   private async handleAppMessage(message: AppMessage, fromSessionId: string) {
@@ -199,17 +196,15 @@ export class CollabRoom {
       if (message.roomId !== this.roomId) return
       if (message.peer.id === this.clientId) return
       this.upsertMember(message.peer.id, message.peer.nickname)
-      await this.ensurePeer(message.peer.id, true)
-      this.achex.broadcast({ type: 'session', session: this.session })
+      // 字典序更大的一方发起 offer，避免双方同时 offer
+      const shouldOffer = this.clientId > message.peer.id
+      await this.ensurePeer(message.peer.id, shouldOffer)
       return
     }
 
     if (message.type === 'session') {
       if (message.session.revisedAt >= this.session.revisedAt) {
         this.applyRemoteSession(message.session)
-        if (![...this.channels.values()].some((c) => c.readyState === 'open')) {
-          this.setMode('achex-relay')
-        }
       }
       return
     }
@@ -222,7 +217,7 @@ export class CollabRoom {
       await pc.setRemoteDescription(message.description)
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      this.achex.sendTo(fromSessionId, { type: 'answer', description: answer })
+      this.signal.sendTo(fromSessionId, { type: 'answer', description: answer })
       return
     }
 
@@ -295,7 +290,7 @@ export class CollabRoom {
 
     pc.onicecandidate = (ev) => {
       if (!ev.candidate) return
-      this.achex.sendTo(remoteId, {
+      this.signal.sendTo(remoteId, {
         type: 'candidate',
         candidate: {
           sdpMLineIndex: ev.candidate.sdpMLineIndex,
@@ -307,7 +302,7 @@ export class CollabRoom {
     if (createOffer) {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      this.achex.sendTo(remoteId, {
+      this.signal.sendTo(remoteId, {
         type: 'offer',
         description: offer,
       })
@@ -318,7 +313,20 @@ export class CollabRoom {
 
   private bindChannel(remoteId: string, channel: RTCDataChannel) {
     this.channels.set(remoteId, channel)
-    channel.onopen = () => this.setMode('webrtc')
+    channel.onopen = () => {
+      this.setMode('webrtc')
+      // DataChannel 就绪后同步当前点单状态（不经 MQTT）
+      try {
+        channel.send(
+          JSON.stringify({
+            type: 'session',
+            session: this.session,
+          } satisfies AppMessage),
+        )
+      } catch {
+        // ignore
+      }
+    }
     channel.onmessage = (ev) => {
       try {
         void this.handleAppMessage(
@@ -333,9 +341,9 @@ export class CollabRoom {
       this.channels.delete(remoteId)
       if (
         ![...this.channels.values()].some((c) => c.readyState === 'open') &&
-        this.achex.isOpen
+        this.signal.isOpen
       ) {
-        this.setMode('achex-relay')
+        this.setMode('mqtt')
       }
     }
   }

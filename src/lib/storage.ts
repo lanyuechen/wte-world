@@ -1,17 +1,26 @@
 import type { AppData, AppSettings } from '../types'
 import { EMPTY_APP_DATA, normalizeAppData } from '../types'
 import { STORAGE_KEYS } from '../constants'
-import {
-  DEFAULT_COLLAB_ROOM_ID,
-  GITHUB_CONFIG,
-  resolveGithubToken,
-} from '../config'
+import { GITHUB_CONFIG, resolveGithubToken } from '../config'
 import { createRoomId, readShareParamsFromHash } from './urls'
 
-export type ScanRoom = {
-  id: string
-  label: string
-  createdAt: string
+function notifyActiveRoom(roomId: string) {
+  window.dispatchEvent(
+    new CustomEvent('wte:active-room', { detail: { roomId } }),
+  )
+}
+
+/** 兼容旧版多扫码房间列表，仅用于首次迁移。 */
+function readLegacyScanRoomId() {
+  const raw = localStorage.getItem(STORAGE_KEYS.scanRooms)
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as { id?: string }[]
+    const id = Array.isArray(parsed) ? parsed[0]?.id?.trim() : ''
+    return id || ''
+  } catch {
+    return ''
+  }
 }
 
 function createMemberId() {
@@ -27,7 +36,7 @@ function withFixedGithub(token?: string): AppSettings['github'] {
   }
 }
 
-/** Achex 用户名用 ASCII，避免部分环境对中文鉴权不稳定 */
+/** 协同昵称用 ASCII，避免部分信令环境对中文不稳定 */
 function defaultNickname(memberId: string) {
   return `guest_${memberId.replace(/-/g, '').slice(0, 8)}`
 }
@@ -115,43 +124,33 @@ export function saveCachedData(data: AppData, sha: string | null) {
   else localStorage.removeItem(STORAGE_KEYS.cacheSha)
 }
 
+/** 读取本机协同房间；链接/扫码中的 room 优先，否则用已存值，首次进入则自动生成。 */
 export function loadActiveRoomId() {
-  return (
-    localStorage.getItem(STORAGE_KEYS.activeRoom)?.trim() ||
-    DEFAULT_COLLAB_ROOM_ID
-  )
+  const fromShare = readShareParamsFromHash().room.trim()
+  if (fromShare) return saveActiveRoomId(fromShare)
+
+  const stored = localStorage.getItem(STORAGE_KEYS.activeRoom)?.trim()
+  if (stored) return stored
+
+  const legacy = readLegacyScanRoomId()
+  if (legacy) {
+    localStorage.removeItem(STORAGE_KEYS.scanRooms)
+    return saveActiveRoomId(legacy)
+  }
+
+  return saveActiveRoomId(createRoomId())
 }
 
 export function saveActiveRoomId(roomId: string) {
-  const id = roomId.trim() || DEFAULT_COLLAB_ROOM_ID
+  const id = roomId.trim() || createRoomId()
   localStorage.setItem(STORAGE_KEYS.activeRoom, id)
   return id
 }
 
-export function loadScanRooms(): ScanRoom[] {
-  const raw = localStorage.getItem(STORAGE_KEYS.scanRooms)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw) as ScanRoom[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-export function saveScanRooms(rooms: ScanRoom[]) {
-  localStorage.setItem(STORAGE_KEYS.scanRooms, JSON.stringify(rooms))
-}
-
-/** 新建一个扫码房间并记入本机列表。 */
-export function createScanRoom(label?: string): ScanRoom {
-  const rooms = loadScanRooms()
-  const room: ScanRoom = {
-    id: createRoomId(),
-    label: label?.trim() || `房间 ${rooms.length + 1}`,
-    createdAt: new Date().toISOString(),
-  }
-  const next = [room, ...rooms].slice(0, 20)
-  saveScanRooms(next)
-  return room
+/** 重新生成协同房间号（扫码页「更新」），并通知协同层重连。 */
+export function regenerateActiveRoomId() {
+  const id = saveActiveRoomId(createRoomId())
+  localStorage.removeItem(STORAGE_KEYS.scanRooms)
+  notifyActiveRoom(id)
+  return id
 }
