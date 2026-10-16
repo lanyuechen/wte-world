@@ -49,9 +49,9 @@ export function Layout() {
             }`}
             title={
               mode === 'webrtc'
-                ? 'WebRTC 已连通，点单可实时同步'
+                ? 'WebRTC 已连通，点单走 P2P'
                 : mode === 'mqtt'
-                  ? '已连信令，等待 WebRTC'
+                  ? '已连信令；P2P 未通时点单经 MQTT 同步'
                   : '未连接'
             }
           >

@@ -1,5 +1,5 @@
 /**
- * EMQX 公共 MQTT 信令客户端（仅 WebRTC 信令，不做业务中继）。
+ * EMQX 公共 MQTT 客户端：WebRTC 信令 + P2P 未通时的点单 session 兜底中继。
  * @see https://www.emqx.com/zh/mqtt/public-mqtt5-broker
  */
 import mqtt, { type MqttClient } from 'mqtt'

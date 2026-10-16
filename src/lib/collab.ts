@@ -1,8 +1,10 @@
 import type { CollabSession, FilterMode, IngredientStatus, Recipe } from '../types'
 import { MqttSignalClient } from './mqtt-signal'
 
-/** idle：信令未连上；mqtt：信令已连；webrtc：DataChannel 已通（业务走 P2P） */
+/** idle：未连；mqtt：信令已连（点单可走 MQTT 兜底）；webrtc：DataChannel 已通 */
 export type CollabTransportMode = 'idle' | 'mqtt' | 'webrtc'
+
+const PEER_RETRY_MAX = 3
 
 export type CollabEvents = {
   onSession: (session: CollabSession) => void
@@ -103,6 +105,8 @@ export class CollabRoom {
   private signal = new MqttSignalClient()
   private peers = new Map<string, RTCPeerConnection>()
   private channels = new Map<string, RTCDataChannel>()
+  private peerRetryCounts = new Map<string, number>()
+  private peerRetryTimers = new Map<string, number>()
   private session: CollabSession
   private destroyed = false
 
@@ -146,6 +150,7 @@ export class CollabRoom {
           members: this.session.members.filter((m) => m.id !== peer.id),
         }
         this.events.onMembers(this.session.members)
+        this.peerRetryCounts.delete(peer.id)
         this.closePeer(peer.id)
       },
       onMessage: (message, fromSessionId) => {
@@ -177,6 +182,9 @@ export class CollabRoom {
 
   destroy() {
     this.destroyed = true
+    for (const timer of this.peerRetryTimers.values()) window.clearTimeout(timer)
+    this.peerRetryTimers.clear()
+    this.peerRetryCounts.clear()
     for (const pc of this.peers.values()) pc.close()
     this.peers.clear()
     this.channels.clear()
@@ -187,24 +195,45 @@ export class CollabRoom {
     this.events.onStatus(mode)
   }
 
-  /** 业务 session 只走 WebRTC，MQTT 仅信令 */
+  /** 优先 WebRTC；对端 DataChannel 未通时经 MQTT 中继点单 */
   private publishSession() {
     this.sendSession(false)
   }
 
-  private sendSession(sync: boolean) {
+  private sendSession(sync: boolean, onlyTo?: string) {
     const payload: AppMessage = {
       type: 'session',
       session: this.session,
       ...(sync ? { sync: true } : {}),
     }
     let sentViaRtc = false
-    for (const channel of this.channels.values()) {
-      if (channel.readyState === 'open') {
-        channel.send(JSON.stringify(payload))
-        sentViaRtc = true
+    const rtcPeers = new Set<string>()
+
+    const tryRtc = (peerId: string) => {
+      const channel = this.channels.get(peerId)
+      if (channel?.readyState !== 'open') return
+      channel.send(JSON.stringify(payload))
+      sentViaRtc = true
+      rtcPeers.add(peerId)
+    }
+
+    if (onlyTo) {
+      tryRtc(onlyTo)
+    } else {
+      for (const peerId of this.channels.keys()) tryRtc(peerId)
+    }
+
+    if (this.signal.isOpen) {
+      if (onlyTo) {
+        if (!rtcPeers.has(onlyTo)) this.signal.sendTo(onlyTo, payload)
+      } else {
+        for (const m of this.session.members) {
+          if (!m.id || m.id === this.clientId) continue
+          if (!rtcPeers.has(m.id)) this.signal.sendTo(m.id, payload)
+        }
       }
     }
+
     if (sentViaRtc) this.setMode('webrtc')
     else if (this.signal.isOpen) this.setMode('mqtt')
   }
@@ -219,6 +248,10 @@ export class CollabRoom {
       // 字典序更大的一方发起 offer，避免双方同时 offer
       const shouldOffer = this.clientId > message.peer.id
       await this.ensurePeer(message.peer.id, shouldOffer)
+      // P2P 未通时也立刻用 MQTT 把已选菜推给新人
+      if (this.session.selectedRecipeIds.length > 0) {
+        this.sendSession(true, message.peer.id)
+      }
       return
     }
 
@@ -308,9 +341,34 @@ export class CollabRoom {
   }
 
   private closePeer(id: string) {
+    const timer = this.peerRetryTimers.get(id)
+    if (timer) {
+      window.clearTimeout(timer)
+      this.peerRetryTimers.delete(id)
+    }
     this.peers.get(id)?.close()
     this.peers.delete(id)
     this.channels.delete(id)
+  }
+
+  private schedulePeerRetry(remoteId: string) {
+    if (this.destroyed || !remoteId) return
+    if (this.channels.get(remoteId)?.readyState === 'open') return
+    if (this.peerRetryTimers.has(remoteId)) return
+    const attempt = this.peerRetryCounts.get(remoteId) ?? 0
+    if (attempt >= PEER_RETRY_MAX) return
+
+    const delay = 1200 * (attempt + 1)
+    const timer = window.setTimeout(() => {
+      this.peerRetryTimers.delete(remoteId)
+      if (this.destroyed) return
+      if (this.channels.get(remoteId)?.readyState === 'open') return
+      this.closePeer(remoteId)
+      this.peerRetryCounts.set(remoteId, attempt + 1)
+      const shouldOffer = this.clientId > remoteId
+      void this.ensurePeer(remoteId, shouldOffer)
+    }, delay)
+    this.peerRetryTimers.set(remoteId, timer)
   }
 
   private async ensurePeer(remoteId: string, createOffer: boolean) {
@@ -338,6 +396,17 @@ export class CollabRoom {
       })
     }
 
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState
+      if (state === 'connected') {
+        this.peerRetryCounts.delete(remoteId)
+        return
+      }
+      if (state === 'failed' || state === 'disconnected') {
+        this.schedulePeerRetry(remoteId)
+      }
+    }
+
     if (createOffer) {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -347,26 +416,29 @@ export class CollabRoom {
       })
     }
 
+    // 跨网 ICE 可能一直 pending：超时后重试
+    window.setTimeout(() => {
+      if (this.destroyed) return
+      if (this.channels.get(remoteId)?.readyState === 'open') return
+      this.schedulePeerRetry(remoteId)
+    }, 5000)
+
     return pc
   }
 
   private bindChannel(remoteId: string, channel: RTCDataChannel) {
     this.channels.set(remoteId, channel)
     channel.onopen = () => {
+      this.peerRetryCounts.delete(remoteId)
+      const timer = this.peerRetryTimers.get(remoteId)
+      if (timer) {
+        window.clearTimeout(timer)
+        this.peerRetryTimers.delete(remoteId)
+      }
       this.setMode('webrtc')
       // 有已选菜才推快照；空点单新人静默等待，避免盖掉房内菜单
       if (this.session.selectedRecipeIds.length === 0) return
-      try {
-        channel.send(
-          JSON.stringify({
-            type: 'session',
-            session: this.session,
-            sync: true,
-          } satisfies AppMessage),
-        )
-      } catch {
-        // ignore
-      }
+      this.sendSession(true, remoteId)
     }
     channel.onmessage = (ev) => {
       try {
