@@ -38,14 +38,3 @@ export async function compressImageToJpeg(file: File): Promise<string> {
 
   throw new Error('图片过大，请换一张更小的图（压缩后需小于 500KB）')
 }
-
-/** 从可 CORS 的图片 URL 拉取并压缩为 JPEG data URL。 */
-export async function compressImageFromUrl(url: string): Promise<string> {
-  const res = await fetch(url, { mode: 'cors' })
-  if (!res.ok) throw new Error('封面图下载失败')
-  const blob = await res.blob()
-  const file = new File([blob], 'cover.jpg', {
-    type: blob.type || 'image/jpeg',
-  })
-  return compressImageToJpeg(file)
-}

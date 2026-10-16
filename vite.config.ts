@@ -13,34 +13,6 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },
-  server: {
-    proxy: {
-      // 下厨房导入：绕过浏览器 CORS（仅本地/dev）
-      '/xcf-proxy': {
-        target: 'https://www.xiachufang.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/xcf-proxy/, ''),
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq) => {
-            proxyReq.setHeader(
-              'User-Agent',
-              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            )
-            proxyReq.setHeader('Accept', 'text/html,application/xhtml+xml')
-          })
-        },
-      },
-    },
-  },
-  preview: {
-    proxy: {
-      '/xcf-proxy': {
-        target: 'https://www.xiachufang.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/xcf-proxy/, ''),
-      },
-    },
-  },
   plugins: [
     react(),
     VitePWA({

@@ -2339,65 +2339,6 @@ code {
   background: var(--brand-soft);
 }
 
-.form-import {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.form-import-row {
-  display: flex;
-  gap: 0.45rem;
-  align-items: stretch;
-}
-
-.form-import-input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.form-import-btn {
-  flex: 0 0 auto;
-  border: 1px solid rgba(18, 38, 29, 0.14);
-  border-radius: 10px;
-  background: var(--brand);
-  color: #fff;
-  font-size: 0.86rem;
-  font-weight: 650;
-  padding: 0 0.9rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.form-import-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.form-import-btn.secondary {
-  align-self: flex-start;
-  background: #fff;
-  color: var(--brand);
-  margin-top: 0.35rem;
-}
-
-.form-import-html {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.form-import-tip {
-  font-size: 0.78rem;
-  line-height: 1.45;
-  margin: 0;
-}
-
-.form-import-html-area {
-  font-size: 0.75rem;
-  min-height: 5rem;
-}
-
 .form-shell {
   display: flex;
   flex-direction: column;

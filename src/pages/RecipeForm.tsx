@@ -3,12 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useApp } from '../context/AppContext'
-import { compressImageFromUrl, compressImageToJpeg } from '../lib/image'
-import {
-  importFromXiachufangUrl,
-  parseXiachufangHtml,
-  parseXiachufangUrl,
-} from '../lib/xiachufang'
+import { compressImageToJpeg } from '../lib/image'
 import type { Recipe } from '../types'
 
 function nowIso() {
@@ -38,44 +33,9 @@ export function RecipeFormPage() {
     editing?.thumbnail ? thumbUrl(editing.thumbnail) : '',
   )
   const [thumbnailDataUrl, setThumbnailDataUrl] = useState<string | null>(null)
-  const [thumbnailRemote, setThumbnailRemote] = useState(
-    editing?.thumbnail?.startsWith('http') ? editing.thumbnail : '',
-  )
   const [error, setError] = useState('')
-  const [importUrl, setImportUrl] = useState('')
-  const [importing, setImporting] = useState(false)
-  const [showHtmlPaste, setShowHtmlPaste] = useState(false)
-  const [htmlPaste, setHtmlPaste] = useState('')
 
   const cancelTo = '/'
-
-  const applyImport = async (data: {
-    name: string
-    ingredients: string[]
-    tags: string[]
-    description: string
-    coverUrl: string
-  }) => {
-    setName(data.name)
-    setIngredients(data.ingredients)
-    setTags(data.tags)
-    setDescription(data.description)
-    setDescTab('edit')
-    setError('')
-
-    if (!data.coverUrl) return
-    setThumbnailRemote(data.coverUrl)
-    setThumbnailPreview(data.coverUrl)
-    try {
-      const dataUrl = await compressImageFromUrl(data.coverUrl)
-      setThumbnailDataUrl(dataUrl)
-      setThumbnailPreview(dataUrl)
-      setThumbnailRemote('')
-    } catch {
-      // 封面外链可直接展示；保存时写入 https 地址
-      setThumbnailDataUrl(null)
-    }
-  }
 
   const allTags = useMemo(() => {
     const set = new Set<string>()
@@ -137,49 +97,9 @@ export function RecipeFormPage() {
       const dataUrl = await compressImageToJpeg(file)
       setThumbnailDataUrl(dataUrl)
       setThumbnailPreview(dataUrl)
-      setThumbnailRemote('')
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : '图片处理失败')
-    }
-  }
-
-  const onImportLink = async () => {
-    if (importing) return
-    setImporting(true)
-    setError('')
-    try {
-      const data = await importFromXiachufangUrl(importUrl)
-      await applyImport(data)
-      setShowHtmlPaste(false)
-    } catch (err) {
-      setShowHtmlPaste(true)
-      setError(
-        err instanceof Error
-          ? `${err.message}。可改为粘贴网页源码导入`
-          : '导入失败，可粘贴网页源码',
-      )
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  const onImportHtml = async () => {
-    if (importing) return
-    setImporting(true)
-    setError('')
-    try {
-      const data = parseXiachufangHtml(
-        htmlPaste,
-        parseXiachufangUrl(importUrl) || '',
-      )
-      await applyImport(data)
-      setShowHtmlPaste(false)
-      setHtmlPaste('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '源码解析失败')
-    } finally {
-      setImporting(false)
     }
   }
 
@@ -198,7 +118,7 @@ export function RecipeFormPage() {
       id: editing?.id ?? crypto.randomUUID(),
       name: name.trim(),
       ingredients,
-      thumbnail: thumbnailRemote || editing?.thumbnail || '',
+      thumbnail: editing?.thumbnail ?? '',
       tags,
       description,
       createdAt: editing?.createdAt ?? nowIso(),
@@ -320,51 +240,6 @@ export function RecipeFormPage() {
           onChange={(e) => void onPickImage(e.target.files?.[0] ?? null)}
         />
 
-        <div className="form-import rise-item">
-          <span className="form-label">从下厨房导入</span>
-          <div className="form-import-row">
-            <input
-              className="input form-import-input"
-              value={importUrl}
-              onChange={(e) => setImportUrl(e.target.value)}
-              placeholder="粘贴下厨房菜谱链接"
-              inputMode="url"
-              autoComplete="off"
-            />
-            <button
-              type="button"
-              className="form-import-btn"
-              disabled={importing || !importUrl.trim()}
-              onClick={() => void onImportLink()}
-            >
-              {importing ? '导入中…' : '导入'}
-            </button>
-          </div>
-          {showHtmlPaste && (
-            <div className="form-import-html">
-              <p className="muted form-import-tip">
-                链接拉取失败时：打开菜谱页 → 右键「显示网页源代码」→ 全选复制 →
-                粘贴到下方
-              </p>
-              <textarea
-                className="input textarea form-import-html-area"
-                rows={4}
-                value={htmlPaste}
-                onChange={(e) => setHtmlPaste(e.target.value)}
-                placeholder="粘贴网页 HTML 源码"
-              />
-              <button
-                type="button"
-                className="form-import-btn secondary"
-                disabled={importing || !htmlPaste.trim()}
-                onClick={() => void onImportHtml()}
-              >
-                从源码导入
-              </button>
-            </div>
-          )}
-        </div>
-
         <div className="form-cover-block rise-item">
           <button
             type="button"
@@ -387,7 +262,6 @@ export function RecipeFormPage() {
               onClick={() => {
                 setThumbnailPreview('')
                 setThumbnailDataUrl(null)
-                setThumbnailRemote('')
                 if (fileRef.current) fileRef.current.value = ''
               }}
             >
