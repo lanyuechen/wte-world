@@ -40,8 +40,8 @@ export function thumbnailRawUrl(
     return path
   }
   const clean = path.replace(/^\//, '')
-  // 国内访问 raw.githubusercontent.com 常不通，缩略图走 jsDelivr
-  return `https://cdn.jsdelivr.net/gh/${settings.owner}/${settings.repo}@${settings.branch}/${clean}`
+  // 国内 cdn.jsdelivr.net 对图片常不稳定（夸克等），改走 testingcf 节点
+  return `https://testingcf.jsdelivr.net/gh/${settings.owner}/${settings.repo}@${settings.branch}/${clean}`
 }
 
 export async function fetchAppData(settings: GithubSettings): Promise<{

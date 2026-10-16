@@ -43,7 +43,8 @@ export default defineConfig({
         runtimeCaching: [
           // 数据仓库缩略图：勿 CacheFirst（jsDelivr@branch 刚上传时偶发 404，会被永久缓存）
           {
-            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/gh\/.*/i,
+            urlPattern:
+              /^https:\/\/(?:cdn|testingcf|gcore|fastly)\.jsdelivr\.net\/gh\/.*/i,
             handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'jsdelivr-gh',
@@ -55,7 +56,8 @@ export default defineConfig({
             },
           },
           {
-            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,
+            urlPattern:
+              /^https:\/\/(?:cdn|testingcf|gcore|fastly)\.jsdelivr\.net\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'jsdelivr-cdn',
