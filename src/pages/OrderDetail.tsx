@@ -1,11 +1,17 @@
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { OlDialog } from '../components/OlDialog'
 import { useApp } from '../context/AppContext'
+import { useCollab } from '../context/CollabContext'
 import { formatDateTime } from '../lib/datetime'
-import type { IngredientStatus, Order } from '../types'
+import { buildIngredientStatus } from '../lib/recipes'
+import type { IngredientStatus, Order, Recipe } from '../types'
 
 export function OrderDetailPage() {
   const { id } = useParams()
   const { data, thumbUrl, saveOrder } = useApp()
+  const { publishOrderUpdated } = useCollab()
+  const [pendingRemove, setPendingRemove] = useState<Recipe | null>(null)
   const order = data.orders.find((o) => o.id === id)
 
   if (!order) {
@@ -23,20 +29,51 @@ export function OrderDetailPage() {
 
   const recipes = order.recipeIds
     .map((rid) => data.recipes.find((r) => r.id === rid))
-    .filter(Boolean)
+    .filter((r): r is Recipe => Boolean(r))
 
   const entries = Object.entries(order.ingredientStatus)
   const needCount = entries.filter(([, s]) => s === 'need').length
   const haveCount = entries.filter(([, s]) => s === 'have').length
 
+  const persistOrder = (next: Order) => {
+    void saveOrder(next)
+    publishOrderUpdated(next)
+  }
+
   const toggleStatus = (name: string, status: IngredientStatus) => {
     const nextStatus: IngredientStatus = status === 'have' ? 'need' : 'have'
-    const next: Order = {
+    persistOrder({
       ...order,
       ingredientStatus: { ...order.ingredientStatus, [name]: nextStatus },
       updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const confirmRemoveDish = () => {
+    if (!pendingRemove) return
+    const recipeId = pendingRemove.id
+    setPendingRemove(null)
+    const recipeIds = order.recipeIds.filter((rid) => rid !== recipeId)
+    if (!recipeIds.length) {
+      persistOrder({
+        ...order,
+        recipeIds: [],
+        ingredientStatus: {},
+        updatedAt: new Date().toISOString(),
+      })
+      return
     }
-    saveOrder(next)
+    persistOrder({
+      ...order,
+      recipeIds,
+      ingredientStatus: buildIngredientStatus(
+        data.recipes,
+        recipeIds,
+        data.availableIngredients,
+        order.ingredientStatus,
+      ),
+      updatedAt: new Date().toISOString(),
+    })
   }
 
   return (
@@ -65,9 +102,11 @@ export function OrderDetailPage() {
             </Link>
           </div>
         </div>
-        <ul className="od-dish-list">
-          {recipes.map((recipe) =>
-            recipe ? (
+        {!recipes.length ? (
+          <p className="od-card-empty">暂无菜品，可点击加菜</p>
+        ) : (
+          <ul className="od-dish-list">
+            {recipes.map((recipe) => (
               <li key={recipe.id}>
                 <div className="od-dish">
                   <div className="od-dish-thumb">
@@ -88,12 +127,19 @@ export function OrderDetailPage() {
                       {recipe.ingredients.length > 4 ? '…' : ''}
                     </p>
                   </div>
-                  <span className="od-dish-qty">x1</span>
+                  <button
+                    type="button"
+                    className="od-dish-remove"
+                    aria-label={`移除 ${recipe.name}`}
+                    onClick={() => setPendingRemove(recipe)}
+                  >
+                    移除
+                  </button>
                 </div>
               </li>
-            ) : null,
-          )}
-        </ul>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="od-card">
@@ -126,6 +172,34 @@ export function OrderDetailPage() {
           </ul>
         )}
       </section>
+
+      {pendingRemove && (
+        <OlDialog
+          titleId="od-remove-dish-title"
+          title="移除菜品"
+          onClose={() => setPendingRemove(null)}
+          actions={
+            <>
+              <button
+                type="button"
+                className="ol-btn ghost"
+                onClick={() => setPendingRemove(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ol-btn danger"
+                onClick={confirmRemoveDish}
+              >
+                确认移除
+              </button>
+            </>
+          }
+        >
+          <p>确认从本单移除「{pendingRemove.name}」？</p>
+        </OlDialog>
+      )}
     </section>
   )
 }

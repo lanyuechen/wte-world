@@ -3,6 +3,7 @@ export const STORAGE_KEYS = {
   cache: 'wte:app-data',
   cacheSha: 'wte:app-data-sha',
   activeRoom: 'wte:active-room',
+  orderFilter: 'wte:order-filter',
 } as const
 
 export const APP_JSON_PATH = 'data/app.json'

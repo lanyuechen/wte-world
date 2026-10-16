@@ -1,4 +1,4 @@
-import type { AppData, AppSettings } from '../types'
+import type { AppData, AppSettings, FilterMode } from '../types'
 import { EMPTY_APP_DATA, normalizeAppData } from '../types'
 import { STORAGE_KEYS } from '../constants'
 import { GITHUB_CONFIG, resolveGithubToken } from '../config'
@@ -141,4 +141,53 @@ export function regenerateActiveRoomId() {
   localStorage.removeItem(LEGACY_SCAN_ROOMS_KEY)
   notifyActiveRoom(id)
   return id
+}
+
+export type OrderFilterState = {
+  availableIngredients: string[]
+  filterMode: FilterMode
+}
+
+const DEFAULT_ORDER_FILTER: OrderFilterState = {
+  availableIngredients: [],
+  filterMode: 'any',
+}
+
+/** 点单筛选项（已有食材 + 匹配模式）本机持久化。 */
+export function loadOrderFilter(): OrderFilterState {
+  const raw = localStorage.getItem(STORAGE_KEYS.orderFilter)
+  if (!raw) return { ...DEFAULT_ORDER_FILTER, availableIngredients: [] }
+  try {
+    const parsed = JSON.parse(raw) as Partial<OrderFilterState>
+    const ingredients = Array.isArray(parsed.availableIngredients)
+      ? parsed.availableIngredients
+          .map((i) => (typeof i === 'string' ? i.trim() : ''))
+          .filter(Boolean)
+      : []
+    const filterMode: FilterMode =
+      parsed.filterMode === 'all' || parsed.filterMode === 'any'
+        ? parsed.filterMode
+        : 'any'
+    return { availableIngredients: ingredients, filterMode }
+  } catch {
+    return { ...DEFAULT_ORDER_FILTER, availableIngredients: [] }
+  }
+}
+
+export function saveOrderFilter(state: OrderFilterState) {
+  const availableIngredients = [
+    ...new Set(
+      state.availableIngredients
+        .map((i) => i.trim())
+        .filter(Boolean),
+    ),
+  ]
+  const filterMode: FilterMode =
+    state.filterMode === 'all' || state.filterMode === 'any'
+      ? state.filterMode
+      : 'any'
+  localStorage.setItem(
+    STORAGE_KEYS.orderFilter,
+    JSON.stringify({ availableIngredients, filterMode }),
+  )
 }

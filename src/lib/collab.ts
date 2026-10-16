@@ -7,6 +7,9 @@ export type CollabTransportMode = 'idle' | 'mqtt' | 'webrtc'
 const PEER_RETRY_MAX = 3
 const MQTT_RECONNECT_BASE_MS = 1200
 const MQTT_RECONNECT_MAX_MS = 15_000
+/** 超过此时长未收到对端任何消息则移出成员列表 */
+const PEER_STALE_MS = 45_000
+const PEER_PRUNE_EVERY_MS = 12_000
 
 type CollabEvents = {
   onSession: (session: CollabSession) => void
@@ -14,6 +17,7 @@ type CollabEvents = {
   onStatus: (mode: CollabTransportMode) => void
   onError: (message: string) => void
   onOrderCreated?: (order: Order, availableIngredients: string[]) => void
+  onOrderUpdated?: (order: Order, availableIngredients: string[]) => void
 }
 
 type AppMessage =
@@ -25,6 +29,11 @@ type AppMessage =
   | { type: 'session'; session: CollabSession; sync?: boolean }
   | {
       type: 'order-created'
+      order: Order
+      availableIngredients: string[]
+    }
+  | {
+      type: 'order-updated'
       order: Order
       availableIngredients: string[]
     }
@@ -78,6 +87,8 @@ export class CollabRoom {
   private peerRetryTimers = new Map<string, number>()
   private mqttReconnectTimer: number | null = null
   private mqttReconnectAttempt = 0
+  private peerLastSeen = new Map<string, number>()
+  private peerPruneTimer: number | null = null
   private session: CollabSession
   private destroyed = false
   private onVisibility = () => {
@@ -106,11 +117,18 @@ export class CollabRoom {
 
     document.addEventListener('visibilitychange', this.onVisibility)
     window.addEventListener('online', this.onOnline)
+    this.peerPruneTimer = window.setInterval(
+      () => this.pruneStaleMembers(),
+      PEER_PRUNE_EVERY_MS,
+    )
 
     void this.signal.joinRoom(roomId, nickname, {
       onJoined: ({ clientId, peers }) => {
         this.clientId = clientId
         this.mqttReconnectAttempt = 0
+        const now = Date.now()
+        this.peerLastSeen.set(clientId, now)
+        for (const p of peers) this.peerLastSeen.set(p.id, now)
         this.session = {
           ...this.session,
           members: [
@@ -128,17 +146,26 @@ export class CollabRoom {
       onReconnected: () => {
         this.mqttReconnectAttempt = 0
         this.refreshTransportMode()
-        // 对仍在成员列表、但 DataChannel 未通的对端再拉一把
-        for (const m of this.session.members) {
-          if (!m.id || m.id === this.clientId) continue
-          if (this.channels.get(m.id)?.readyState === 'open') continue
-          this.peerRetryCounts.delete(m.id)
-          this.closePeer(m.id)
-          const shouldOffer = this.clientId > m.id
-          void this.ensurePeer(m.id, shouldOffer)
+        // 重连后先只保留自己 + 仍通的 P2P，其余靠 hello 重新发现
+        if (this.clientId) {
+          const self = { id: this.clientId, name: this.nickname }
+          const live = this.session.members.filter(
+            (m) =>
+              m.id === this.clientId ||
+              this.channels.get(m.id)?.readyState === 'open',
+          )
+          const members = live.some((m) => m.id === self.id)
+            ? live
+            : [self, ...live]
+          this.peerLastSeen.clear()
+          const now = Date.now()
+          for (const m of members) this.peerLastSeen.set(m.id, now)
+          this.session = { ...this.session, members }
+          this.events.onMembers(this.session.members)
         }
       },
       onPeerLeave: (peer) => {
+        this.peerLastSeen.delete(peer.id)
         this.session = {
           ...this.session,
           members: this.session.members.filter((m) => m.id !== peer.id),
@@ -148,11 +175,13 @@ export class CollabRoom {
         this.closePeer(peer.id)
       },
       onMessage: (message, fromSessionId) => {
+        if (fromSessionId) this.touchPeer(fromSessionId)
         void this.handleAppMessage(message as AppMessage, fromSessionId)
       },
       onClose: () => {
         if (this.destroyed) return
-        // MQTT 断了但 DataChannel 仍通时保持 P2P 状态
+        // MQTT 断了：无 P2P 时名单只留自己；有 P2P 则只留 DataChannel 仍通的人
+        this.pruneMembersOnMqttDown()
         this.refreshTransportMode()
         this.scheduleMqttReconnect()
       },
@@ -190,10 +219,23 @@ export class CollabRoom {
     })
   }
 
+  /** 广播订单更新（加菜/删菜等）；不清空对端点单草稿。 */
+  publishOrderUpdated(order: Order, availableIngredients: string[]) {
+    this.relayPayload({
+      type: 'order-updated',
+      order,
+      availableIngredients,
+    })
+  }
+
   destroy() {
     this.destroyed = true
     document.removeEventListener('visibilitychange', this.onVisibility)
     window.removeEventListener('online', this.onOnline)
+    if (this.peerPruneTimer !== null) {
+      window.clearInterval(this.peerPruneTimer)
+      this.peerPruneTimer = null
+    }
     if (this.mqttReconnectTimer !== null) {
       window.clearTimeout(this.mqttReconnectTimer)
       this.mqttReconnectTimer = null
@@ -332,7 +374,7 @@ export class CollabRoom {
         message.order,
         message.availableIngredients ?? [],
       )
-      // 对端清空点单（不经 sync 空快照保护）
+      // 生成订单：对端同步清空点单草稿
       this.session = {
         ...this.session,
         selectedRecipeIds: [],
@@ -340,6 +382,15 @@ export class CollabRoom {
         revisedAt: Math.max(this.session.revisedAt, Date.now()),
       }
       this.events.onSession(this.session)
+      return
+    }
+
+    if (message.type === 'order-updated') {
+      if (!message.order?.id) return
+      this.events.onOrderUpdated?.(
+        message.order,
+        message.availableIngredients ?? [],
+      )
       return
     }
 
@@ -412,7 +463,13 @@ export class CollabRoom {
     this.events.onMembers(this.session.members)
   }
 
+  private touchPeer(id: string) {
+    if (!id || id === this.clientId) return
+    this.peerLastSeen.set(id, Date.now())
+  }
+
   private upsertMember(id: string, name: string) {
+    this.touchPeer(id)
     const exists = this.session.members.some((m) => m.id === id)
     this.session = {
       ...this.session,
@@ -420,6 +477,55 @@ export class CollabRoom {
         ? this.session.members.map((m) => (m.id === id ? { id, name } : m))
         : [...this.session.members, { id, name }],
     }
+    this.events.onMembers(this.session.members)
+  }
+
+  private pruneStaleMembers() {
+    if (this.destroyed || !this.clientId) return
+    if (this.signal.isOpen) this.signal.announcePresence()
+    const now = Date.now()
+    const next = this.session.members.filter((m) => {
+      if (m.id === this.clientId) return true
+      if (this.channels.get(m.id)?.readyState === 'open') {
+        this.touchPeer(m.id)
+        return true
+      }
+      const seen = this.peerLastSeen.get(m.id) ?? 0
+      return now - seen < PEER_STALE_MS
+    })
+    if (next.length === this.session.members.length) return
+    const kept = new Set(next.map((m) => m.id))
+    for (const m of this.session.members) {
+      if (!kept.has(m.id)) {
+        this.peerLastSeen.delete(m.id)
+        this.closePeer(m.id)
+      }
+    }
+    this.session = { ...this.session, members: next }
+    this.events.onMembers(this.session.members)
+  }
+
+  private pruneMembersOnMqttDown() {
+    if (!this.clientId) return
+    const self = {
+      id: this.clientId,
+      name: this.nickname,
+    }
+    const live = this.session.members.filter(
+      (m) =>
+        m.id === this.clientId ||
+        this.channels.get(m.id)?.readyState === 'open',
+    )
+    const members = live.some((m) => m.id === self.id)
+      ? live
+      : [self, ...live]
+    for (const m of this.session.members) {
+      if (!members.some((x) => x.id === m.id)) {
+        this.peerLastSeen.delete(m.id)
+        this.closePeer(m.id)
+      }
+    }
+    this.session = { ...this.session, members }
     this.events.onMembers(this.session.members)
   }
 

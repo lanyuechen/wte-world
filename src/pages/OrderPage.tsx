@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
+import { MenuCardShell } from '../components/MenuCardShell'
+import { OrderFilterPanel } from '../components/OrderFilterPanel'
 import { RecipeCard } from '../components/RecipeCard'
 import { RecipeSheet } from '../components/RecipeSheet'
-import { buildIngredientStatus, filterRecipes } from '../lib/recipes'
+import { useMenuCategoryNav } from '../hooks/useMenuCategoryNav'
+import {
+  ALL_CATEGORY,
+  buildMenuCategories,
+  buildMenuSections,
+  buildOrderTitle,
+} from '../lib/menu'
+import { buildIngredientStatus, countRecipeOrders } from '../lib/recipes'
 import type { CollabSession, FilterMode, Order, Recipe } from '../types'
-
-const ALL_CATEGORY = '全部'
-const OTHER_CATEGORY = '其他'
-
-function recipeTags(recipe: Recipe) {
-  return recipe.tags.map((t) => t.trim()).filter(Boolean)
-}
 
 function FilterIcon() {
   return (
@@ -58,7 +60,6 @@ export function OrderPage() {
   const {
     data,
     thumbUrl,
-    allIngredients,
     saveOrder,
     removeRecipe: deleteLibraryRecipe,
   } = useApp()
@@ -67,6 +68,7 @@ export function OrderPage() {
     error,
     patchSession,
     publishOrderCreated,
+    publishOrderUpdated,
     clearError,
     roomId,
   } = useCollab()
@@ -79,93 +81,70 @@ export function OrderPage() {
   const isAddMode = Boolean(targetOrder)
 
   const [query, setQuery] = useState('')
-  const [category, setCategory] = useState(ALL_CATEGORY)
-  const [newIng, setNewIng] = useState('')
-  const [addingIng, setAddingIng] = useState(false)
   const [localError, setLocalError] = useState('')
   const [filterOpen, setFilterOpen] = useState(false)
   const [cartOpen, setCartOpen] = useState(false)
   const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  const commitNewIngredient = () => {
-    const v = newIng.trim()
-    if (v && !session.availableIngredients.includes(v)) {
-      patch({
-        availableIngredients: [...session.availableIngredients, v],
-      })
-    }
-    setNewIng('')
-    setAddingIng(false)
-  }
+  const categories = useMemo(
+    () => buildMenuCategories(data.recipes),
+    [data.recipes],
+  )
+
+  const recipeIngredients = useMemo(() => {
+    const set = new Set<string>()
+    data.recipes.forEach((r) =>
+      r.ingredients.forEach((i) => {
+        const v = i.trim()
+        if (v) set.add(v)
+      }),
+    )
+    return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
+  }, [data.recipes])
+
+  const recipeOrderCounts = useMemo(
+    () => countRecipeOrders(data.orders),
+    [data.orders],
+  )
+
+  const sections = useMemo(
+    () =>
+      buildMenuSections(
+        data.recipes,
+        categories,
+        session.availableIngredients,
+        session.filterMode,
+        query,
+      ),
+    [
+      data.recipes,
+      categories,
+      session.availableIngredients,
+      session.filterMode,
+      query,
+    ],
+  )
+
+  const {
+    activeCategory,
+    catBar,
+    menuListRef,
+    menuCatsRef,
+    scrollDirRef,
+    bindCatBtn,
+    selectCategory,
+    onMenuListScroll,
+    enableCategorySpyFromUser,
+  } = useMenuCategoryNav(sections, categories)
+
+  const filterActive = session.availableIngredients.length > 0
 
   const patch = (partial: Partial<CollabSession>) => {
     patchSession(partial)
   }
 
-  const categories = useMemo(() => {
-    const counts = new Map<string, number>()
-    let otherCount = 0
-    for (const recipe of data.recipes) {
-      const tags = recipeTags(recipe)
-      if (!tags.length) {
-        otherCount += 1
-        continue
-      }
-      for (const t of tags) {
-        counts.set(t, (counts.get(t) ?? 0) + 1)
-      }
-    }
-    const list = [...counts.keys()]
-      .sort((a, b) => a.localeCompare(b, 'zh'))
-      .map((tag) => ({ tag, count: counts.get(tag) ?? 0 }))
-    if (otherCount > 0) {
-      list.push({ tag: OTHER_CATEGORY, count: otherCount })
-    }
-    return list
-  }, [data.recipes])
-
-  useEffect(() => {
-    if (
-      category !== ALL_CATEGORY &&
-      !categories.some((c) => c.tag === category)
-    ) {
-      setCategory(ALL_CATEGORY)
-    }
-  }, [category, categories])
-
-  const filterActive = session.availableIngredients.length > 0
-
-  const filtered = useMemo(() => {
-    if (category === OTHER_CATEGORY) {
-      const untagged = data.recipes.filter((r) => !recipeTags(r).length)
-      return filterRecipes(
-        untagged,
-        session.availableIngredients,
-        session.filterMode,
-        query,
-        [],
-      )
-    }
-    const tags = category === ALL_CATEGORY ? [] : [category]
-    return filterRecipes(
-      data.recipes,
-      session.availableIngredients,
-      session.filterMode,
-      query,
-      tags,
-    )
-  }, [
-    data.recipes,
-    session.availableIngredients,
-    session.filterMode,
-    query,
-    category,
-  ])
-
-  const toggleAvailable = (ing: string) => {
-    const availableIngredients = session.availableIngredients.includes(ing)
-      ? session.availableIngredients.filter((i) => i !== ing)
-      : [...session.availableIngredients, ing]
+  const setAvailableIngredients = (availableIngredients: string[]) => {
     patch({
       availableIngredients,
       ingredientStatus: buildIngredientStatus(
@@ -208,9 +187,7 @@ export function OrderPage() {
     [session.selectedRecipeIds, data.recipes],
   )
 
-  useEffect(() => {
-    if (!session.selectedRecipeIds.length) setCartOpen(false)
-  }, [session.selectedRecipeIds.length])
+  const showCartSheet = cartOpen && selectedRecipes.length > 0
 
   const toggleAddRecipe = (id: string) => {
     if (session.selectedRecipeIds.includes(id)) removeRecipe(id)
@@ -219,30 +196,18 @@ export function OrderPage() {
 
   const setFilterMode = (filterMode: FilterMode) => patch({ filterMode })
 
-  const buildOrderTitle = () => {
-    const now = new Date()
-    const pad = (n: number, len = 2) => String(n).padStart(len, '0')
-    const stamp =
-      `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-      `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-    const rand =
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID().replace(/-/g, '').slice(0, 4)
-        : Math.random().toString(36).slice(2, 6)
-    const room = (roomId || 'wte').toUpperCase()
-    return `${room}-${stamp}-${rand.toUpperCase()}`
-  }
-
   const createOrder = () => {
+    if (submitting) return
     if (!session.selectedRecipeIds.length) {
       setLocalError('请至少选择一道菜')
       return
     }
     setLocalError('')
     clearError()
+    setSubmitting(true)
     const order: Order = {
       id: crypto.randomUUID(),
-      title: buildOrderTitle(),
+      title: buildOrderTitle(roomId),
       recipeIds: session.selectedRecipeIds,
       ingredientStatus: buildIngredientStatus(
         data.recipes,
@@ -253,14 +218,15 @@ export function OrderPage() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    // 仅点击方写 GitHub；同时广播给房间其他人（本地落单 + 清空点单）
-    void saveOrder(order, session.availableIngredients)
-    publishOrderCreated(order, session.availableIngredients)
-    navigate(`/orders/${order.id}`)
+    window.setTimeout(() => {
+      void saveOrder(order, session.availableIngredients)
+      publishOrderCreated(order, session.availableIngredients)
+      navigate(`/orders/${order.id}`)
+    }, 220)
   }
 
-  /** 加菜：把本次新选菜合并进已有订单并同步 */
   const addDishesToOrder = () => {
+    if (submitting) return
     if (!targetOrder) {
       createOrder()
       return
@@ -271,6 +237,7 @@ export function OrderPage() {
     }
     setLocalError('')
     clearError()
+    setSubmitting(true)
     const recipeIds = [
       ...new Set([...targetOrder.recipeIds, ...session.selectedRecipeIds]),
     ]
@@ -288,9 +255,12 @@ export function OrderPage() {
       ),
       updatedAt: new Date().toISOString(),
     }
-    void saveOrder(order, session.availableIngredients)
-    publishOrderCreated(order, session.availableIngredients)
-    navigate(`/orders/${order.id}`)
+    window.setTimeout(() => {
+      void saveOrder(order, session.availableIngredients)
+      publishOrderUpdated(order, session.availableIngredients)
+      patchSession({ selectedRecipeIds: [], ingredientStatus: {} })
+      navigate(`/orders/${order.id}`)
+    }, 220)
   }
 
   return (
@@ -305,123 +275,59 @@ export function OrderPage() {
           </Link>
         </div>
       )}
-      <div className="search-row">
-        <input
-          className="input search-input"
-          placeholder="搜索菜名"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <div className="filter-anchor">
-          <button
-            type="button"
-            className={`filter-icon-btn ${filterActive ? 'active' : ''}`}
-            aria-expanded={filterOpen}
-            aria-haspopup="dialog"
-            aria-label="食材过滤"
-            onClick={() => setFilterOpen((v) => !v)}
-          >
-            <FilterIcon />
-            {filterActive && <span className="filter-dot" aria-hidden />}
-          </button>
+
+      <div className={`search-block ${filterOpen ? 'is-open' : ''}`}>
+        <div className="search-row">
+          <input
+            className="input search-input"
+            placeholder="搜索菜名"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="filter-anchor">
+            <button
+              type="button"
+              className={`filter-icon-btn ${filterActive ? 'active' : ''}`}
+              aria-expanded={filterOpen}
+              aria-haspopup="dialog"
+              aria-label="食材过滤"
+              onClick={() => setFilterOpen((v) => !v)}
+            >
+              <FilterIcon />
+              {filterActive && <span className="filter-dot" aria-hidden />}
+            </button>
+          </div>
         </div>
 
         {filterOpen && (
-          <>
-            <button
-              type="button"
-              className="filter-float-mask"
-              aria-label="关闭过滤"
-              onClick={() => setFilterOpen(false)}
-            />
-            <div className="filter-float" role="dialog" aria-label="已有食材">
-              <div className="filter-float-head">
-                <h2>已有食材</h2>
-                <button
-                  type="button"
-                  className="filter-float-close"
-                  onClick={() => {
-                    setAddingIng(false)
-                    setNewIng('')
-                    setFilterOpen(false)
-                  }}
-                >
-                  完成
-                </button>
-              </div>
-
-              <div className="filter-mode-list" role="group">
-                <button
-                  type="button"
-                  className={`filter-mode-card ${session.filterMode === 'all' ? 'active' : ''}`}
-                  onClick={() => setFilterMode('all')}
-                >
-                  <strong>完全匹配</strong>
-                  <span>无需采购，利用家里的食材即可</span>
-                </button>
-                <button
-                  type="button"
-                  className={`filter-mode-card ${session.filterMode === 'any' ? 'active' : ''}`}
-                  onClick={() => setFilterMode('any')}
-                >
-                  <strong>部分匹配</strong>
-                  <span>利用家里剩余食材，再补充采购一些即可</span>
-                </button>
-              </div>
-
-              <div className="chips filter-float-chips">
-                {allIngredients.map((ing) => (
-                  <button
-                    key={ing}
-                    type="button"
-                    className={`chip ${
-                      session.availableIngredients.includes(ing) ? 'active' : ''
-                    }`}
-                    onClick={() => toggleAvailable(ing)}
-                  >
-                    {ing}
-                  </button>
-                ))}
-                {addingIng ? (
-                  <input
-                    className="chip-add-input"
-                    autoFocus
-                    placeholder="食材名"
-                    value={newIng}
-                    onChange={(e) => setNewIng(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        commitNewIngredient()
-                      }
-                      if (e.key === 'Escape') {
-                        setNewIng('')
-                        setAddingIng(false)
-                      }
-                    }}
-                    onBlur={() => commitNewIngredient()}
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    className="chip chip-dashed"
-                    onClick={() => setAddingIng(true)}
-                  >
-                    + 添加食材
-                  </button>
-                )}
-              </div>
-            </div>
-          </>
+          <OrderFilterPanel
+            filterMode={session.filterMode}
+            availableIngredients={session.availableIngredients}
+            recipeIngredients={recipeIngredients}
+            onFilterMode={setFilterMode}
+            onAvailableChange={setAvailableIngredients}
+            onClose={() => setFilterOpen(false)}
+          />
         )}
       </div>
 
       <div className="menu-layout">
-        <aside className="menu-cats" aria-label="菜谱分类">
+        <aside ref={menuCatsRef} className="menu-cats" aria-label="菜谱分类">
+          {catBar.ready && (
+            <i
+              className="menu-cat-indicator"
+              aria-hidden
+              style={{
+                transform: `translateY(${catBar.top}px)`,
+                height: catBar.height,
+              }}
+            />
+          )}
           <button
             type="button"
-            className={`menu-cat ${category === ALL_CATEGORY ? 'active' : ''}`}
-            onClick={() => setCategory(ALL_CATEGORY)}
+            ref={bindCatBtn(ALL_CATEGORY)}
+            className={`menu-cat ${activeCategory === ALL_CATEGORY ? 'active' : ''}`}
+            onClick={() => selectCategory(ALL_CATEGORY)}
           >
             全部
           </button>
@@ -429,22 +335,24 @@ export function OrderPage() {
             <button
               key={tag}
               type="button"
-              className={`menu-cat ${category === tag ? 'active' : ''}`}
-              onClick={() => setCategory(tag)}
+              ref={bindCatBtn(tag)}
+              className={`menu-cat ${activeCategory === tag ? 'active' : ''}`}
+              onClick={() => selectCategory(tag)}
             >
               {tag}
             </button>
           ))}
         </aside>
 
-        <div className="menu-list">
-          <div className="menu-list-head">
-            <h2>{category}</h2>
-            <Link className="menu-list-add" to="/recipes/new">
-              + 菜谱
-            </Link>
-          </div>
-          {!filtered.length ? (
+        <div
+          ref={menuListRef}
+          className="menu-list"
+          onScroll={onMenuListScroll}
+          onWheel={enableCategorySpyFromUser}
+          onTouchStart={enableCategorySpyFromUser}
+          onPointerDown={enableCategorySpyFromUser}
+        >
+          {!sections.length ? (
             <div className="menu-empty">
               <strong>没有菜谱</strong>
               <p>先添加一道菜，或换个分类看看</p>
@@ -453,19 +361,34 @@ export function OrderPage() {
               </Link>
             </div>
           ) : (
-            <div className="recipe-list menu-recipes">
-              {filtered.map((recipe, index) => (
-                <RecipeCard
-                  key={recipe.id}
-                  recipe={recipe}
-                  thumbUrl={thumbUrl(recipe.thumbnail)}
-                  selected={session.selectedRecipeIds.includes(recipe.id)}
-                  onOpen={() => setDetailRecipe(recipe)}
-                  onAdd={() => toggleAddRecipe(recipe.id)}
-                  index={index}
-                />
-              ))}
-            </div>
+            sections.map(({ tag, recipes }) => (
+              <section key={tag} className="menu-section">
+                <div className="menu-list-head">
+                  <h2>{tag}</h2>
+                  <Link className="menu-list-add" to="/recipes/new">
+                    + 菜谱
+                  </Link>
+                </div>
+                <div className="menu-recipes">
+                  {recipes.map((recipe) => (
+                    <MenuCardShell
+                      key={`${tag}-${recipe.id}`}
+                      rootRef={menuListRef}
+                      scrollDirRef={scrollDirRef}
+                    >
+                      <RecipeCard
+                        recipe={recipe}
+                        thumbUrl={thumbUrl(recipe.thumbnail)}
+                        selected={session.selectedRecipeIds.includes(recipe.id)}
+                        orderCount={recipeOrderCounts.get(recipe.id) ?? 0}
+                        onOpen={() => setDetailRecipe(recipe)}
+                        onAdd={() => toggleAddRecipe(recipe.id)}
+                      />
+                    </MenuCardShell>
+                  ))}
+                </div>
+              </section>
+            ))
           )}
         </div>
       </div>
@@ -474,7 +397,7 @@ export function OrderPage() {
         <p className="error-text order-error">{localError || error}</p>
       )}
 
-      {cartOpen && selectedRecipes.length > 0 && (
+      {showCartSheet && (
         <>
           <button
             type="button"
@@ -535,7 +458,7 @@ export function OrderPage() {
           type="button"
           className="order-cart-info"
           disabled={!session.selectedRecipeIds.length}
-          aria-expanded={cartOpen}
+          aria-expanded={showCartSheet}
           onClick={() => {
             if (!session.selectedRecipeIds.length) return
             setCartOpen((v) => !v)
@@ -546,7 +469,9 @@ export function OrderPage() {
           >
             <CartIcon />
             {session.selectedRecipeIds.length > 0 && (
-              <i>{session.selectedRecipeIds.length}</i>
+              <i key={session.selectedRecipeIds.length}>
+                {session.selectedRecipeIds.length}
+              </i>
             )}
           </span>
           <span className="order-cart-text">
@@ -556,16 +481,16 @@ export function OrderPage() {
           </span>
         </button>
         <button
-          className="order-cart-btn"
+          className={`order-cart-btn ${submitting ? 'is-loading' : ''}`}
           type="button"
-          disabled={!session.selectedRecipeIds.length}
+          disabled={!session.selectedRecipeIds.length || submitting}
           onClick={() => {
             setCartOpen(false)
             if (isAddMode) addDishesToOrder()
             else createOrder()
           }}
         >
-          {isAddMode ? '加菜' : '生成订单'}
+          {submitting ? '处理中…' : isAddMode ? '加菜' : '下单'}
         </button>
       </div>
 

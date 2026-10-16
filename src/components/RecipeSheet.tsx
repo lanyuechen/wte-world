@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Recipe } from '../types'
+import { OlDialog } from './OlDialog'
 
 export function RecipeSheet({
   recipe,
@@ -24,7 +26,7 @@ export function RecipeSheet({
   const tags = recipe.tags.map((t) => t.trim()).filter(Boolean)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
-  return (
+  return createPortal(
     <div className="recipe-sheet" role="dialog" aria-modal="true" aria-label={recipe.name}>
       <button type="button" className="recipe-sheet-mask" aria-label="关闭" onClick={onClose} />
       <div className="recipe-sheet-panel">
@@ -128,22 +130,13 @@ export function RecipeSheet({
         </div>
 
         {confirmDelete && (
-          <div
-            className="ol-dialog recipe-sheet-delete-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="recipe-delete-title"
-          >
-            <button
-              type="button"
-              className="ol-dialog-mask"
-              aria-label="关闭"
-              onClick={() => setConfirmDelete(false)}
-            />
-            <div className="ol-dialog-panel">
-              <h2 id="recipe-delete-title">删除菜谱</h2>
-              <p>确认删除「{recipe.name}」？删除后将从菜谱库移除且不可恢复。</p>
-              <div className="ol-dialog-actions">
+          <OlDialog
+            className="recipe-sheet-delete-dialog"
+            titleId="recipe-delete-title"
+            title="删除菜谱"
+            onClose={() => setConfirmDelete(false)}
+            actions={
+              <>
                 <button
                   type="button"
                   className="ol-btn ghost"
@@ -162,11 +155,14 @@ export function RecipeSheet({
                 >
                   确认删除
                 </button>
-              </div>
-            </div>
-          </div>
+              </>
+            }
+          >
+            <p>确认删除「{recipe.name}」？删除后将从菜谱库移除且不可恢复。</p>
+          </OlDialog>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

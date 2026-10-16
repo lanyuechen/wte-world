@@ -1,4 +1,18 @@
-import type { FilterMode, IngredientStatus, Recipe } from '../types'
+import type { FilterMode, IngredientStatus, Order, Recipe } from '../types'
+
+/** 按订单列表统计每道菜被点过的次数（每个订单计 1 次） */
+export function countRecipeOrders(orders: Order[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const order of orders) {
+    const seen = new Set<string>()
+    for (const id of order.recipeIds) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      counts.set(id, (counts.get(id) ?? 0) + 1)
+    }
+  }
+  return counts
+}
 
 export function filterRecipes(
   recipes: Recipe[],

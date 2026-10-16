@@ -198,6 +198,16 @@ export class MqttSignalClient {
     } satisfies SignalEnvelope)
   }
 
+  /** 周期性宣告在线，便于对端清理僵尸成员 */
+  announcePresence() {
+    if (!this.isOpen || !this.clientId) return
+    this.publishLobby({
+      type: 'peer-hello',
+      peer: { id: this.clientId, nickname: this.nickname },
+      roomId: this.roomId,
+    })
+  }
+
   close() {
     this.closedByUser = true
     this.connecting = false

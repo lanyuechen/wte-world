@@ -25,10 +25,24 @@ function toGithubError(err: unknown): Error {
     return new Error('GitHub 权限不足，请检查 Token 对数据仓库的 Contents 读写权限')
   }
   if (status === 409 || status === 422) {
-    return new Error('远程数据已变更，请先同步再保存')
+    return new ConflictError('远程数据已变更，请先同步再保存')
   }
   if (err instanceof Error) return err
   return new Error(message || 'GitHub 请求失败')
+}
+
+export class ConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ConflictError'
+  }
+}
+
+export function isConflictError(err: unknown): boolean {
+  return (
+    err instanceof ConflictError ||
+    (err instanceof Error && /远程数据已变更/.test(err.message))
+  )
 }
 
 export function thumbnailRawUrl(

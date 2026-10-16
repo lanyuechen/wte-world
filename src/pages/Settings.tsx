@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
+import { Danmaku } from '../components/Danmaku'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
+import { SCAN_DANMAKU_PHRASES } from '../lib/scanPhrases'
 import { regenerateActiveRoomId } from '../lib/storage'
 import { buildScanShareUrl } from '../lib/urls'
 
@@ -25,6 +27,26 @@ async function copyText(text: string) {
       return false
     }
   }
+}
+
+function IconRefresh() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M20 12a8 8 0 1 1-2.3-5.6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M20 4v5h-5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }
 
 export function SettingsPage() {
@@ -67,33 +89,41 @@ export function SettingsPage() {
 
   return (
     <section className="scan-poster scan-rooms">
-      <p className="scan-kicker">家庭共享点餐</p>
-      <h1 className="scan-brand">吃什么</h1>
-      <p className="scan-lead">扫一下，一起勾选今天的菜</p>
+      <Danmaku phrases={SCAN_DANMAKU_PHRASES} />
+      <div className="scan-poster-content">
+        <p className="scan-kicker">家庭共享点餐</p>
+        <h1 className="scan-brand">吃什么</h1>
 
-      <div className="scan-qr-card">
-        <div className="scan-qr-frame">
-          {qrDataUrl ? (
-            <img className="qr poster" src={qrDataUrl} alt="共享点单二维码" />
-          ) : (
-            <div className="thumb-placeholder large">生成中…</div>
-          )}
+        <div className="scan-qr-card">
+          <div className={`scan-qr-frame ${copied ? 'is-copied' : ''}`}>
+            <button
+              type="button"
+              className="scan-qr-hit"
+              onClick={() => void copyLink()}
+              aria-label={copied ? '链接已复制' : '点击复制点单链接'}
+            >
+              {qrDataUrl ? (
+                <img className="qr poster" src={qrDataUrl} alt="" />
+              ) : (
+                <div className="thumb-placeholder large">生成中…</div>
+              )}
+              {copied && <span className="scan-qr-copied">已复制</span>}
+            </button>
+            <button
+              type="button"
+              className="scan-qr-refresh"
+              aria-label="更新二维码"
+              onClick={updateRoom}
+            >
+              <IconRefresh />
+            </button>
+          </div>
         </div>
-        <div className="scan-qr-actions">
-          <button
-            type="button"
-            className={`scan-qr-copy ${copied ? 'is-copied' : ''}`}
-            onClick={() => void copyLink()}
-          >
-            {copied ? '已复制' : '复制链接'}
-          </button>
-          <button type="button" className="scan-qr-update" onClick={updateRoom}>
-            更新
-          </button>
-        </div>
+
+        <p className="scan-hint">
+          吾日三省吾身，早饭吃什么，午饭吃什么，晚饭吃什么
+        </p>
       </div>
-
-      <p className="scan-hint">打开手机摄像头或浏览器扫码即可进点单</p>
     </section>
   )
 }

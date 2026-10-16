@@ -14,11 +14,47 @@ import { GITHUB_CONFIG, resolveGithubToken } from '../config'
 import {
   deleteRecipeThumbnail,
   fetchAppData,
+  isConflictError,
   putAppData,
   thumbnailRawUrl,
   uploadThumbnail,
 } from '../lib/github'
 import { loadCachedData, loadSettings, saveCachedData, saveSettings } from '../lib/storage'
+
+const CONFLICT_RETRY_MAX = 2
+
+function pickNewerByUpdatedAt<T extends { id: string; updatedAt: string }>(
+  local: T[],
+  remote: T[],
+): T[] {
+  const map = new Map<string, T>()
+  for (const item of remote) map.set(item.id, item)
+  for (const item of local) {
+    const prev = map.get(item.id)
+    if (!prev) {
+      map.set(item.id, item)
+      continue
+    }
+    const localT = Date.parse(item.updatedAt) || 0
+    const remoteT = Date.parse(prev.updatedAt) || 0
+    map.set(item.id, localT >= remoteT ? item : prev)
+  }
+  return [...map.values()]
+}
+
+/** 冲突时合并本地与远程：菜谱/订单按 updatedAt 取新，食材列表取并集。 */
+function mergeAppDataForConflict(local: AppData, remote: AppData): AppData {
+  const recipes = pickNewerByUpdatedAt(local.recipes, remote.recipes).sort(
+    (a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0),
+  )
+  const orders = pickNewerByUpdatedAt(local.orders, remote.orders).sort(
+    (a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0),
+  )
+  const availableIngredients = [
+    ...new Set([...remote.availableIngredients, ...local.availableIngredients]),
+  ].sort((a, b) => a.localeCompare(b, 'zh'))
+  return { recipes, orders, availableIngredients }
+}
 
 type Status = {
   syncing: boolean
@@ -34,7 +70,8 @@ type AppContextValue = {
   thumbUrl: (path: string) => string
   applyGithubToken: (token: string) => Promise<void>
   syncFromRemote: () => Promise<void>
-  saveRecipe: (recipe: Recipe, thumbnailDataUrl?: string | null) => void
+  /** thumbnailPatch：undefined 保持原封面；'' 清除；data URL 换新图 */
+  saveRecipe: (recipe: Recipe, thumbnailPatch?: string) => void
   removeRecipe: (id: string) => void
   saveOrder: (order: Order, availableIngredients?: string[]) => void
   /** 协同端收到他人生成的订单：只写本地，不触发 GitHub */
@@ -143,6 +180,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (flushingRef.current) return
     flushingRef.current = true
     let failed = false
+    let conflictTries = 0
 
     setStatus((s) => ({
       ...s,
@@ -154,18 +192,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       while (dirtyRef.current) {
         dirtyRef.current = false
-        const snapshot = dataRef.current
-        const currentSha = shaRef.current
-        const result = await persistToGithub(
-          settingsRef.current,
-          snapshot,
-          currentSha,
-        )
-        const merged = mergeUploadedThumbs(dataRef.current, result.data)
-        dataRef.current = merged
-        setData(merged)
-        setSha(result.sha)
-        shaRef.current = result.sha
+        try {
+          const snapshot = dataRef.current
+          const currentSha = shaRef.current
+          const result = await persistToGithub(
+            settingsRef.current,
+            snapshot,
+            currentSha,
+          )
+          const merged = mergeUploadedThumbs(dataRef.current, result.data)
+          dataRef.current = merged
+          setData(merged)
+          setSha(result.sha)
+          shaRef.current = result.sha
+          conflictTries = 0
+        } catch (err) {
+          if (isConflictError(err) && conflictTries < CONFLICT_RETRY_MAX) {
+            conflictTries += 1
+            const github = githubFromSettings(settingsRef.current)
+            const remote = await fetchAppData(github)
+            const merged = mergeAppDataForConflict(dataRef.current, remote.data)
+            dataRef.current = merged
+            setData(merged)
+            setSha(remote.sha)
+            shaRef.current = remote.sha
+            saveCachedData(merged, remote.sha)
+            dirtyRef.current = true
+            continue
+          }
+          throw err
+        }
       }
       setStatus({
         syncing: false,
@@ -296,21 +352,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const saveRecipe = useCallback(
-    (recipe: Recipe, thumbnailDataUrl?: string | null) => {
-      const saved: Recipe = {
-        ...recipe,
-        thumbnail:
-          thumbnailDataUrl !== undefined && thumbnailDataUrl !== null
-            ? thumbnailDataUrl
-            : recipe.thumbnail,
-      }
+    (recipe: Recipe, thumbnailPatch?: string) => {
+      let prevThumb = ''
+      let nextThumb = recipe.thumbnail
       commit((prev) => {
+        prevThumb = prev.recipes.find((r) => r.id === recipe.id)?.thumbnail ?? ''
+        nextThumb =
+          thumbnailPatch !== undefined ? thumbnailPatch : recipe.thumbnail
+        const saved: Recipe = { ...recipe, thumbnail: nextThumb }
         const exists = prev.recipes.some((r) => r.id === saved.id)
         const recipes = exists
           ? prev.recipes.map((r) => (r.id === saved.id ? saved : r))
           : [...prev.recipes, saved]
         return { ...prev, recipes }
       })
+      // 清除封面，或仓库路径变更时删旧文件（同 id 的 data: 上传会覆盖，无需先删）
+      const shouldDeleteOld =
+        Boolean(prevThumb) &&
+        !prevThumb.startsWith('data:') &&
+        (nextThumb === '' ||
+          (Boolean(nextThumb) &&
+            !nextThumb.startsWith('data:') &&
+            nextThumb !== prevThumb))
+      if (shouldDeleteOld) {
+        const gh = githubFromSettings(settingsRef.current)
+        void deleteRecipeThumbnail(gh, recipe.id, prevThumb)
+      }
     },
     [commit],
   )

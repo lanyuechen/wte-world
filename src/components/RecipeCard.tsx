@@ -1,8 +1,24 @@
+import { useEffect, useRef, useState } from 'react'
 import type { Recipe } from '../types'
 
 function AddMark({ selected }: { selected?: boolean }) {
+  const mounted = useRef(false)
+  const [popKey, setPopKey] = useState(0)
+
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    setPopKey((k) => k + 1)
+  }, [selected])
+
   return (
-    <span className={`menu-add ${selected ? 'on' : ''}`} aria-hidden>
+    <span
+      key={popKey}
+      className={`menu-add ${selected ? 'on' : ''} ${popKey ? 'is-pop' : ''}`}
+      aria-hidden
+    >
       {selected ? (
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
           <path
@@ -31,24 +47,22 @@ export function RecipeCard({
   recipe,
   thumbUrl,
   selected,
+  orderCount = 0,
   onOpen,
   onAdd,
-  index = 0,
 }: {
   recipe: Recipe
   thumbUrl: string
   selected?: boolean
+  /** 历史订单中出现的次数 */
+  orderCount?: number
   onOpen?: () => void
   onAdd?: () => void
-  index?: number
 }) {
   const meta = recipe.tags.slice(0, 2).join(' · ')
 
   return (
-    <div
-      className={`recipe-card menu-item rise-item ${selected ? 'selected' : ''}`}
-      style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
-    >
+    <div className={`recipe-card menu-item ${selected ? 'selected' : ''}`}>
       <button type="button" className="menu-item-main" onClick={onOpen}>
         <div className="card-thumb">
           {thumbUrl ? (
@@ -57,6 +71,11 @@ export function RecipeCard({
             <div className="thumb-placeholder">
               <span>{recipe.name.slice(0, 1)}</span>
             </div>
+          )}
+          {orderCount > 0 && (
+            <span className="card-order-count" aria-label={`已点 ${orderCount} 次`}>
+              {orderCount}次
+            </span>
           )}
         </div>
         <div className="card-body">

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { OlDialog } from '../components/OlDialog'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
 import { formatDateTime } from '../lib/datetime'
@@ -21,6 +22,7 @@ export function OrdersPage() {
   const { data, removeOrder, thumbUrl } = useApp()
   const { patchSession } = useCollab()
   const [pendingDelete, setPendingDelete] = useState<Order | null>(null)
+  const [leavingId, setLeavingId] = useState<string | null>(null)
 
   const sorted = useMemo(
     () =>
@@ -44,16 +46,20 @@ export function OrdersPage() {
   }
 
   const confirmRemove = () => {
-    if (!pendingDelete) return
+    if (!pendingDelete || leavingId) return
     const id = pendingDelete.id
     setPendingDelete(null)
-    void removeOrder(id)
+    setLeavingId(id)
+    window.setTimeout(() => {
+      void removeOrder(id)
+      setLeavingId(null)
+    }, 200)
   }
 
   return (
     <section className="orders-meituan">
       <header className="ol-head">
-        <h1>我的订单</h1>
+        <h1>订单</h1>
       </header>
 
       {!sorted.length ? (
@@ -80,8 +86,14 @@ export function OrdersPage() {
             return (
               <article
                 key={order.id}
-                className="ol-card rise-item"
-                style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+                className={`ol-card rise-item ${
+                  leavingId === order.id ? 'is-leaving' : ''
+                }`}
+                style={
+                  leavingId === order.id
+                    ? undefined
+                    : { animationDelay: `${Math.min(index, 8) * 40}ms` }
+                }
               >
                 <Link to={`/orders/${order.id}`} className="ol-card-link">
                   <div className="ol-card-top">
@@ -156,24 +168,12 @@ export function OrdersPage() {
       )}
 
       {pendingDelete && (
-        <div
-          className="ol-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="ol-dialog-title"
-        >
-          <button
-            type="button"
-            className="ol-dialog-mask"
-            aria-label="关闭"
-            onClick={() => setPendingDelete(null)}
-          />
-          <div className="ol-dialog-panel">
-            <h2 id="ol-dialog-title">删除订单</h2>
-            <p>
-              确认删除「{pendingDelete.title}」？删除后不可恢复。
-            </p>
-            <div className="ol-dialog-actions">
+        <OlDialog
+          titleId="ol-dialog-title"
+          title="删除订单"
+          onClose={() => setPendingDelete(null)}
+          actions={
+            <>
               <button
                 type="button"
                 className="ol-btn ghost"
@@ -188,9 +188,11 @@ export function OrdersPage() {
               >
                 确认删除
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p>确认删除「{pendingDelete.title}」？删除后不可恢复。</p>
+        </OlDialog>
       )}
     </section>
   )

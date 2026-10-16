@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
 import { IconOrder, IconOrders, IconScan } from './TabIcons'
+import { OlDialog } from './OlDialog'
 
 const links = [
   { to: '/', label: '点单', end: true, Icon: IconOrder, badgeKey: 'order' as const },
@@ -63,8 +64,13 @@ export function Layout() {
   const { status, retryPersist, dismissPersistError, syncFromRemote } = useApp()
   const { session, mode } = useCollab()
   const [ghErrorOpen, setGhErrorOpen] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
+  const membersWrapRef = useRef<HTMLDivElement>(null)
   const onOrderPage = location.pathname === '/'
-  const onOrderDetail = /^\/orders\/[^/]+$/.test(location.pathname)
+  const onOrdersSurface =
+    location.pathname === '/orders' ||
+    /^\/orders\/[^/]+$/.test(location.pathname)
+  const onScanPage = location.pathname === '/settings'
   const onRecipeForm =
     location.pathname === '/recipes/new' ||
     /^\/recipes\/[^/]+\/edit$/.test(location.pathname)
@@ -72,14 +78,32 @@ export function Layout() {
     session.members.length,
     mode === 'idle' ? 0 : 1,
   )
-  const linkLabel =
-    mode === 'webrtc' ? 'P2P' : mode === 'mqtt' ? 'MQTT' : '未连接'
+  const linkLabel = mode === 'webrtc' ? 'P2P' : 'MQTT'
+  const mqttConnecting = mode === 'idle'
   const ghState = status.syncing ? 'busy' : status.error ? 'error' : 'ok'
   const selectedCount = session.selectedRecipeIds.length
 
   useEffect(() => {
     if (!status.error) setGhErrorOpen(false)
   }, [status.error])
+
+  useEffect(() => {
+    if (!membersOpen) return
+    const onDoc = (ev: MouseEvent) => {
+      if (!membersWrapRef.current?.contains(ev.target as Node)) {
+        setMembersOpen(false)
+      }
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setMembersOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [membersOpen])
 
   const onRetryGithub = () => {
     if (status.retry === 'sync') void syncFromRemote()
@@ -90,7 +114,9 @@ export function Layout() {
     <div
       className={`app-shell ${onOrderPage ? 'is-order' : ''} ${
         onRecipeForm ? 'is-form' : ''
-      } ${onOrderDetail ? 'is-order-detail' : ''}`}
+      } ${onOrdersSurface ? 'is-order-detail' : ''} ${
+        onScanPage ? 'is-scan' : ''
+      }`}
     >
       <header className="topbar">
         <p className="brand">
@@ -107,12 +133,39 @@ export function Layout() {
           }`}
         >
           <i className="live-dot" aria-hidden />
-          <span className="topbar-online">
-            {onlineCount} 人
-            <span className="topbar-link-mode" aria-label={`连接 ${linkLabel}`}>
-              · {linkLabel}
-            </span>
-          </span>
+          <div className="topbar-members-wrap" ref={membersWrapRef}>
+            <button
+              type="button"
+              className="topbar-online"
+              aria-expanded={membersOpen}
+              aria-haspopup="listbox"
+              title="查看在线成员"
+              onClick={() => setMembersOpen((v) => !v)}
+            >
+              {onlineCount} 人
+              <span
+                className={`topbar-link-mode ${mqttConnecting ? 'is-breathing' : ''}`}
+                aria-label={
+                  mqttConnecting ? '正在连接 MQTT' : `连接 ${linkLabel}`
+                }
+              >
+                · {linkLabel}
+              </span>
+            </button>
+            {membersOpen && (
+              <div className="topbar-members-pop" role="listbox" aria-label="在线成员">
+                {session.members.length ? (
+                  <ul>
+                    {session.members.map((m) => (
+                      <li key={m.id}>{m.name || m.id}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="topbar-members-empty">暂无成员</p>
+                )}
+              </div>
+            )}
+          </div>
           <span className="topbar-link-mode" aria-hidden>
             ·
           </span>
@@ -151,7 +204,9 @@ export function Layout() {
           onRecipeForm ? 'page-form' : ''
         }`}
       >
-        <Outlet />
+        <div key={location.pathname} className="page-transition">
+          <Outlet />
+        </div>
       </main>
 
       <nav className="tabbar tabbar-3" aria-label="主导航">
@@ -167,7 +222,11 @@ export function Layout() {
                 <span className="tab-icon-wrap">
                   <link.Icon active={isActive} />
                   {link.badgeKey === 'order' && selectedCount > 0 && (
-                    <span className="tab-badge" aria-label={`已选 ${selectedCount}`}>
+                    <span
+                      key={selectedCount}
+                      className="tab-badge"
+                      aria-label={`已选 ${selectedCount}`}
+                    >
                       {selectedCount > 99 ? '99+' : selectedCount}
                     </span>
                   )}
@@ -180,22 +239,12 @@ export function Layout() {
       </nav>
 
       {ghErrorOpen && status.error && (
-        <div
-          className="ol-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="gh-sync-error-title"
-        >
-          <button
-            type="button"
-            className="ol-dialog-mask"
-            aria-label="关闭"
-            onClick={() => setGhErrorOpen(false)}
-          />
-          <div className="ol-dialog-panel">
-            <h2 id="gh-sync-error-title">GitHub 同步失败</h2>
-            <p className="topbar-gh-error-msg">{status.error}</p>
-            <div className="ol-dialog-actions">
+        <OlDialog
+          titleId="gh-sync-error-title"
+          title="GitHub 同步失败"
+          onClose={() => setGhErrorOpen(false)}
+          actions={
+            <>
               <button
                 type="button"
                 className="ol-btn ghost"
@@ -216,9 +265,11 @@ export function Layout() {
                   {status.syncing ? '重试中…' : '重试'}
                 </button>
               )}
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="topbar-gh-error-msg">{status.error}</p>
+        </OlDialog>
       )}
     </div>
   )

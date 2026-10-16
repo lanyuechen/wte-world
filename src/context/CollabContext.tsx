@@ -13,7 +13,7 @@ import {
   createEmptySession,
   type CollabTransportMode,
 } from '../lib/collab'
-import { loadActiveRoomId } from '../lib/storage'
+import { loadActiveRoomId, loadOrderFilter, saveOrderFilter } from '../lib/storage'
 import type { CollabSession, Order } from '../types'
 import { useApp } from './AppContext'
 
@@ -23,8 +23,10 @@ type CollabContextValue = {
   error: string
   roomId: string
   patchSession: (partial: Partial<CollabSession>) => void
-  /** 生成订单后广播给房间；本机点单清空。GitHub 仍由调用方 saveOrder。 */
+  /** 生成新订单：广播并清空点单草稿 */
   publishOrderCreated: (order: Order, availableIngredients: string[]) => void
+  /** 更新已有订单（加菜/删菜）：广播，不清空点单草稿 */
+  publishOrderUpdated: (order: Order, availableIngredients?: string[]) => void
   clearError: () => void
 }
 
@@ -39,9 +41,14 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyRemoteOrderRef.current = applyRemoteOrder
   }, [applyRemoteOrder])
-  const [session, setSession] = useState<CollabSession>(() =>
-    createEmptySession(roomId),
-  )
+  const [session, setSession] = useState<CollabSession>(() => {
+    const filter = loadOrderFilter()
+    return {
+      ...createEmptySession(roomId),
+      availableIngredients: filter.availableIngredients,
+      filterMode: filter.filterMode,
+    }
+  })
   const [mode, setMode] = useState<CollabTransportMode>('idle')
   const [error, setError] = useState('')
 
@@ -57,6 +64,7 @@ export function CollabProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setError('')
+    const filter = loadOrderFilter()
     const collab = new CollabRoom(
       roomId,
       settings.nickname,
@@ -69,11 +77,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
         onOrderCreated: (order, availableIngredients) => {
           applyRemoteOrderRef.current(order, availableIngredients)
         },
+        onOrderUpdated: (order, availableIngredients) => {
+          applyRemoteOrderRef.current(order, availableIngredients)
+        },
       },
       {
-        // 筛选「已有食材」默认全不选，由用户按需勾选
-        availableIngredients: [],
-        filterMode: 'any',
+        availableIngredients: filter.availableIngredients,
+        filterMode: filter.filterMode,
         selectedRecipeIds: [],
       },
     )
@@ -84,8 +94,14 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       collab.destroy()
       roomRef.current = null
     }
-    // 昵称或房间变化时重建连接
   }, [settings.nickname, roomId])
+
+  useEffect(() => {
+    saveOrderFilter({
+      availableIngredients: session.availableIngredients,
+      filterMode: session.filterMode,
+    })
+  }, [session.availableIngredients, session.filterMode])
 
   const patchSession = useCallback((partial: Partial<CollabSession>) => {
     roomRef.current?.updateSession(partial)
@@ -94,6 +110,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
   const publishOrderCreated = useCallback(
     (order: Order, availableIngredients: string[]) => {
       roomRef.current?.publishOrderCreated(order, availableIngredients)
+    },
+    [],
+  )
+
+  const publishOrderUpdated = useCallback(
+    (order: Order, availableIngredients: string[] = []) => {
+      roomRef.current?.publishOrderUpdated(order, availableIngredients)
     },
     [],
   )
@@ -108,9 +131,19 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       roomId,
       patchSession,
       publishOrderCreated,
+      publishOrderUpdated,
       clearError,
     }),
-    [session, mode, error, roomId, patchSession, publishOrderCreated, clearError],
+    [
+      session,
+      mode,
+      error,
+      roomId,
+      patchSession,
+      publishOrderCreated,
+      publishOrderUpdated,
+      clearError,
+    ],
   )
 
   return (
