@@ -8,12 +8,8 @@ export const GITHUB_CONFIG = {
 /** 默认协同房间号（本地未指定房间时使用） */
 export const DEFAULT_COLLAB_ROOM_ID = 'wte-home'
 
-/**
- * 扫码分享用的站点入口（jsDelivr CDN → gh-pages，国内访问更稳）。
- * 显式 index.html 以便 jsDelivr 正确返回入口。
- */
-export const SCAN_SHARE_BASE =
-  'https://cdn.jsdelivr.net/gh/lanyuechen/wte-world@gh-pages/index.html'
+/** 扫码分享用的站点入口（GitHub Pages）。 */
+export const SCAN_SHARE_BASE = 'https://lanyuechen.github.io/wte-world/'
 
 /**
  * Achex 信令（对齐 https://github.com/lanyuechen/retina ）
