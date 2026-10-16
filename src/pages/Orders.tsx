@@ -104,6 +104,7 @@ export function OrdersPage() {
                               <img
                                 src={thumbUrl(recipe.thumbnail)}
                                 alt=""
+                                referrerPolicy="no-referrer"
                               />
                             ) : (
                               <span>

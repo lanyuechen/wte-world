@@ -41,6 +41,19 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webp}'],
         navigateFallback: 'index.html',
         runtimeCaching: [
+          // 数据仓库缩略图：勿 CacheFirst（jsDelivr@branch 刚上传时偶发 404，会被永久缓存）
+          {
+            urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/gh\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'jsdelivr-gh',
+              expiration: {
+                maxEntries: 120,
+                maxAgeSeconds: 60 * 60 * 24 * 7,
+              },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
           {
             urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,
             handler: 'CacheFirst',
@@ -50,7 +63,7 @@ export default defineConfig({
                 maxEntries: 80,
                 maxAgeSeconds: 60 * 60 * 24 * 30,
               },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
@@ -62,7 +75,7 @@ export default defineConfig({
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24 * 7,
               },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],

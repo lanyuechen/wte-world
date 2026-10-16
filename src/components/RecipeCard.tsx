@@ -52,7 +52,7 @@ export function RecipeCard({
       <button type="button" className="menu-item-main" onClick={onOpen}>
         <div className="card-thumb">
           {thumbUrl ? (
-            <img src={thumbUrl} alt="" />
+            <img src={thumbUrl} alt="" referrerPolicy="no-referrer" />
           ) : (
             <div className="thumb-placeholder">
               <span>{recipe.name.slice(0, 1)}</span>

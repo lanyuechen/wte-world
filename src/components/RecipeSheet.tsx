@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -10,6 +11,7 @@ export function RecipeSheet({
   onClose,
   onAdd,
   onRemove,
+  onDelete,
 }: {
   recipe: Recipe
   thumbUrl: string
@@ -17,8 +19,10 @@ export function RecipeSheet({
   onClose: () => void
   onAdd: () => void
   onRemove?: () => void
+  onDelete?: () => void
 }) {
   const tags = recipe.tags.map((t) => t.trim()).filter(Boolean)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
     <div className="recipe-sheet" role="dialog" aria-modal="true" aria-label={recipe.name}>
@@ -48,13 +52,24 @@ export function RecipeSheet({
                   </div>
                 )}
               </div>
-              <Link
-                className="btn text"
-                to={`/recipes/${recipe.id}/edit`}
-                onClick={onClose}
-              >
-                编辑
-              </Link>
+              <div className="recipe-sheet-head-actions">
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="btn text danger-text"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    删除
+                  </button>
+                )}
+                <Link
+                  className="btn text"
+                  to={`/recipes/${recipe.id}/edit`}
+                  onClick={onClose}
+                >
+                  编辑
+                </Link>
+              </div>
             </div>
 
             <section className="recipe-sheet-section">
@@ -111,6 +126,46 @@ export function RecipeSheet({
             </button>
           )}
         </div>
+
+        {confirmDelete && (
+          <div
+            className="ol-dialog recipe-sheet-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-delete-title"
+          >
+            <button
+              type="button"
+              className="ol-dialog-mask"
+              aria-label="关闭"
+              onClick={() => setConfirmDelete(false)}
+            />
+            <div className="ol-dialog-panel">
+              <h2 id="recipe-delete-title">删除菜谱</h2>
+              <p>确认删除「{recipe.name}」？删除后将从菜谱库移除且不可恢复。</p>
+              <div className="ol-dialog-actions">
+                <button
+                  type="button"
+                  className="ol-btn ghost"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  className="ol-btn danger"
+                  onClick={() => {
+                    onDelete?.()
+                    setConfirmDelete(false)
+                    onClose()
+                  }}
+                >
+                  确认删除
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -70,6 +70,7 @@ export function OrderDetailPage() {
                       <img
                         src={thumbUrl(recipe.thumbnail)}
                         alt={recipe.name}
+                        referrerPolicy="no-referrer"
                       />
                     ) : (
                       <span>{recipe.name.slice(0, 1)}</span>

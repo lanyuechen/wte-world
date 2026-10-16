@@ -881,6 +881,18 @@ body:has(.app-shell.is-form) {
   margin-bottom: 0.85rem;
 }
 
+.recipe-sheet-head-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.recipe-sheet-delete-dialog {
+  z-index: 40;
+}
+
 .recipe-sheet-title {
   min-width: 0;
   display: flex;

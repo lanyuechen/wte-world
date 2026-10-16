@@ -54,7 +54,13 @@ function CartIcon() {
 
 export function OrderPage() {
   const navigate = useNavigate()
-  const { data, thumbUrl, allIngredients, saveOrder } = useApp()
+  const {
+    data,
+    thumbUrl,
+    allIngredients,
+    saveOrder,
+    removeRecipe: deleteLibraryRecipe,
+  } = useApp()
   const { session, error, patchSession, clearError, roomId } = useCollab()
 
   const [query, setQuery] = useState('')
@@ -436,7 +442,11 @@ export function OrderPage() {
                   <div className="order-cart-sheet-item">
                     <div className="order-cart-sheet-thumb">
                       {recipe.thumbnail ? (
-                        <img src={thumbUrl(recipe.thumbnail)} alt="" />
+                        <img
+                          src={thumbUrl(recipe.thumbnail)}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                        />
                       ) : (
                         <span>{recipe.name.slice(0, 1)}</span>
                       )}
@@ -506,6 +516,11 @@ export function OrderPage() {
           onClose={() => setDetailRecipe(null)}
           onAdd={() => addRecipe(detailRecipe.id)}
           onRemove={() => removeRecipe(detailRecipe.id)}
+          onDelete={() => {
+            const id = detailRecipe.id
+            if (session.selectedRecipeIds.includes(id)) removeRecipe(id)
+            deleteLibraryRecipe(id)
+          }}
         />
       )}
     </section>
