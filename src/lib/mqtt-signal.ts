@@ -17,6 +17,8 @@ type Handlers = {
     clientId: string
     peers: { id: string; nickname: string }[]
   }) => void
+  /** MQTT 重连成功（保持同一 clientId，不重置房间成员） */
+  onReconnected?: () => void
   onPeerLeave?: (peer: { id: string; nickname: string }) => void
   onMessage?: (message: unknown, fromSessionId: string) => void
   onClose?: () => void
@@ -38,6 +40,8 @@ export class MqttSignalClient {
   private handlers: Handlers = {}
   private nickname = ''
   private closedByUser = false
+  private connecting = false
+  private announced = false
   private knownPeers = new Map<string, string>()
   clientId = ''
   roomId = ''
@@ -60,23 +64,38 @@ export class MqttSignalClient {
     this.roomId = roomId
     this.nickname = nickname
     this.closedByUser = false
+    this.announced = false
     this.knownPeers.clear()
     this.clientId =
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
         : `p${Date.now().toString(36)}`
 
-    const clientId = `wte_${this.clientId}`
+    await this.openConnection()
+  }
+
+  /** 断线后重连：复用 clientId / 房间，不触发 onJoined。 */
+  async reconnect() {
+    if (this.closedByUser || this.connecting || this.isOpen) return
+    if (!this.roomId || !this.nickname || !this.clientId) return
+    await this.openConnection()
+  }
+
+  private async openConnection() {
+    if (this.connecting || this.closedByUser) return
+    this.connecting = true
+    this.teardownClient()
+
     const leavePayload = JSON.stringify({
       type: 'peer-leave',
-      peer: { id: this.clientId, nickname },
-      roomId,
+      peer: { id: this.clientId, nickname: this.nickname },
+      roomId: this.roomId,
     } satisfies PresenceMsg)
 
     try {
       await new Promise<void>((resolve, reject) => {
         const client = mqtt.connect(MQTT_SIGNAL_CONFIG.url, {
-          clientId,
+          clientId: `wte_${this.clientId}`,
           clean: true,
           connectTimeout: 10_000,
           reconnectPeriod: 0,
@@ -91,7 +110,7 @@ export class MqttSignalClient {
         this.client = client
 
         const timer = window.setTimeout(() => {
-          reject(new Error('连接 MQTT 信令超时'))
+          reject(new Error('连接 MQTT 超时'))
           client.end(true)
         }, 12_000)
 
@@ -105,19 +124,24 @@ export class MqttSignalClient {
         })
       })
     } catch (err) {
-      this.teardown()
+      this.teardownClient()
+      this.connecting = false
       if (!this.closedByUser) {
         this.handlers.onError?.(
           err instanceof Error
             ? err.message
             : '无法连接 EMQX（请检查网络是否可访问 broker-cn.emqx.io）',
         )
+        this.handlers.onClose?.()
       }
       return
     }
 
     const client = this.client
-    if (!client) return
+    if (!client || this.closedByUser) {
+      this.connecting = false
+      return
+    }
 
     client.on('message', (topic, payload) => {
       this.handleMessage(topic, payload.toString())
@@ -126,17 +150,38 @@ export class MqttSignalClient {
       if (!this.closedByUser) this.handlers.onClose?.()
     })
 
-    await this.subscribe([this.lobbyTopic(), this.inboxTopic()])
+    try {
+      await this.subscribe([this.lobbyTopic(), this.inboxTopic()])
+    } catch (err) {
+      this.teardownClient()
+      this.connecting = false
+      if (!this.closedByUser) {
+        this.handlers.onError?.(
+          err instanceof Error ? err.message : 'MQTT 订阅失败',
+        )
+        this.handlers.onClose?.()
+      }
+      return
+    }
 
-    // 尚无成员列表服务：先回报自己，对端靠 lobby 发现
-    this.handlers.onJoined?.({ clientId: this.clientId, peers: [] })
+    this.connecting = false
+    if (this.closedByUser) return
+
+    // 重连后重新发现对端
+    this.knownPeers.clear()
+
+    if (!this.announced) {
+      this.announced = true
+      this.handlers.onJoined?.({ clientId: this.clientId, peers: [] })
+    } else {
+      this.handlers.onReconnected?.()
+    }
 
     this.publishLobby({
       type: 'peer-join',
       peer: { id: this.clientId, nickname: this.nickname },
       roomId: this.roomId,
     })
-    // 让已在房间的人回应，便于补齐 peers
     this.publishLobby({
       type: 'peer-hello',
       peer: { id: this.clientId, nickname: this.nickname },
@@ -145,7 +190,6 @@ export class MqttSignalClient {
   }
 
   broadcast(message: unknown) {
-    // 仅用于信令广播（如 peer-join 外的房间级信令）
     this.publishRaw(this.lobbyTopic(), {
       from: this.clientId,
       nickname: this.nickname,
@@ -165,6 +209,7 @@ export class MqttSignalClient {
 
   close() {
     this.closedByUser = true
+    this.connecting = false
     if (this.client?.connected) {
       this.publishLobby({
         type: 'peer-leave',
@@ -172,12 +217,15 @@ export class MqttSignalClient {
         roomId: this.roomId,
       })
     }
-    this.teardown()
+    this.teardownClient()
     this.clientId = ''
+    this.roomId = ''
+    this.nickname = ''
+    this.announced = false
     this.knownPeers.clear()
   }
 
-  private teardown() {
+  private teardownClient() {
     if (this.client) {
       try {
         this.client.removeAllListeners()
@@ -227,7 +275,6 @@ export class MqttSignalClient {
     if (!env.from || env.from === this.clientId) return
     if (env.roomId && env.roomId !== this.roomId) return
 
-    // inbox 或 lobby 上的信令包
     if (topic === this.inboxTopic() || topic === this.lobbyTopic()) {
       if (env.nickname) this.knownPeers.set(env.from, env.nickname)
       this.handlers.onMessage?.(env.message, env.from)
@@ -248,7 +295,6 @@ export class MqttSignalClient {
       const isNew = !this.knownPeers.has(msg.peer.id)
       this.knownPeers.set(msg.peer.id, msg.peer.nickname)
       if (isNew) {
-        // 伪装成原 Achex 的 peer-join-room，复用 collab 逻辑
         this.handlers.onMessage?.(
           {
             type: 'peer-join-room',
@@ -258,7 +304,6 @@ export class MqttSignalClient {
           msg.peer.id,
         )
       }
-      // 已在房的人回复 hello，让新人发现自己
       if (msg.type === 'peer-hello') {
         this.publishLobby({
           type: 'peer-join',

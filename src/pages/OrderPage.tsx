@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
 import { RecipeCard } from '../components/RecipeCard'
@@ -54,6 +54,7 @@ function CartIcon() {
 
 export function OrderPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const {
     data,
     thumbUrl,
@@ -61,7 +62,21 @@ export function OrderPage() {
     saveOrder,
     removeRecipe: deleteLibraryRecipe,
   } = useApp()
-  const { session, error, patchSession, clearError, roomId } = useCollab()
+  const {
+    session,
+    error,
+    patchSession,
+    publishOrderCreated,
+    clearError,
+    roomId,
+  } = useCollab()
+
+  const addToOrderId = searchParams.get('addTo')?.trim() ?? ''
+  const targetOrder = useMemo(
+    () => data.orders.find((o) => o.id === addToOrderId) ?? null,
+    [data.orders, addToOrderId],
+  )
+  const isAddMode = Boolean(targetOrder)
 
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState(ALL_CATEGORY)
@@ -238,13 +253,58 @@ export function OrderPage() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    // 本地先写入并立刻跳转，GitHub 在后台串行保存
+    // 仅点击方写 GitHub；同时广播给房间其他人（本地落单 + 清空点单）
     void saveOrder(order, session.availableIngredients)
+    publishOrderCreated(order, session.availableIngredients)
+    navigate(`/orders/${order.id}`)
+  }
+
+  /** 加菜：把本次新选菜合并进已有订单并同步 */
+  const addDishesToOrder = () => {
+    if (!targetOrder) {
+      createOrder()
+      return
+    }
+    if (!session.selectedRecipeIds.length) {
+      setLocalError('请至少选择一道要加的菜')
+      return
+    }
+    setLocalError('')
+    clearError()
+    const recipeIds = [
+      ...new Set([...targetOrder.recipeIds, ...session.selectedRecipeIds]),
+    ]
+    const order: Order = {
+      ...targetOrder,
+      recipeIds,
+      ingredientStatus: buildIngredientStatus(
+        data.recipes,
+        recipeIds,
+        session.availableIngredients,
+        {
+          ...targetOrder.ingredientStatus,
+          ...session.ingredientStatus,
+        },
+      ),
+      updatedAt: new Date().toISOString(),
+    }
+    void saveOrder(order, session.availableIngredients)
+    publishOrderCreated(order, session.availableIngredients)
     navigate(`/orders/${order.id}`)
   }
 
   return (
     <section className="order-page">
+      {isAddMode && targetOrder && (
+        <div className="order-add-banner">
+          <span>
+            为订单加菜：<strong>{targetOrder.title}</strong>
+          </span>
+          <Link className="order-add-cancel" to={`/orders/${targetOrder.id}`}>
+            取消
+          </Link>
+        </div>
+      )}
       <div className="search-row">
         <input
           className="input search-input"
@@ -501,10 +561,11 @@ export function OrderPage() {
           disabled={!session.selectedRecipeIds.length}
           onClick={() => {
             setCartOpen(false)
-            createOrder()
+            if (isAddMode) addDishesToOrder()
+            else createOrder()
           }}
         >
-          生成订单
+          {isAddMode ? '加菜' : '生成订单'}
         </button>
       </div>
 

@@ -12,7 +12,7 @@ import type { AppData, AppSettings, Order, Recipe } from '../types'
 import { EMPTY_APP_DATA } from '../types'
 import { GITHUB_CONFIG, resolveGithubToken } from '../config'
 import {
-  deleteThumbnail,
+  deleteRecipeThumbnail,
   fetchAppData,
   putAppData,
   thumbnailRawUrl,
@@ -41,6 +41,8 @@ type AppContextValue = {
   removeRecipe: (id: string) => void
   setAvailableIngredients: (list: string[]) => void
   saveOrder: (order: Order, availableIngredients?: string[]) => void
+  /** 协同端收到他人生成的订单：只写本地，不触发 GitHub */
+  applyRemoteOrder: (order: Order, availableIngredients?: string[]) => void
   removeOrder: (id: string) => void
   retryPersist: () => void
   dismissPersistError: () => void
@@ -338,10 +340,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         thumb = prev.recipes.find((r) => r.id === id)?.thumbnail ?? ''
         return { ...prev, recipes: prev.recipes.filter((r) => r.id !== id) }
       })
-      if (thumb && !thumb.startsWith('data:')) {
-        const gh = githubFromSettings(settingsRef.current)
-        void deleteThumbnail(gh, thumb)
-      }
+      const gh = githubFromSettings(settingsRef.current)
+      void deleteRecipeThumbnail(gh, id, thumb)
     },
     [commit],
   )
@@ -370,6 +370,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
     },
     [commit],
+  )
+
+  const applyRemoteOrder = useCallback(
+    (order: Order, availableIngredients?: string[]) => {
+      setData((prev) => {
+        const exists = prev.orders.some((o) => o.id === order.id)
+        const orders = exists
+          ? prev.orders.map((o) => (o.id === order.id ? order : o))
+          : [order, ...prev.orders]
+        const next = {
+          ...prev,
+          orders,
+          ...(availableIngredients !== undefined
+            ? { availableIngredients }
+            : null),
+        }
+        dataRef.current = next
+        saveCachedData(next, shaRef.current)
+        return next
+      })
+    },
+    [],
   )
 
   const removeOrder = useCallback(
@@ -402,6 +424,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeRecipe,
     setAvailableIngredients,
     saveOrder,
+    applyRemoteOrder,
     removeOrder,
     retryPersist,
     dismissPersistError,

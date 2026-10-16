@@ -1,16 +1,25 @@
-import type { CollabSession, FilterMode, IngredientStatus, Recipe } from '../types'
+import type {
+  CollabSession,
+  FilterMode,
+  IngredientStatus,
+  Order,
+  Recipe,
+} from '../types'
 import { MqttSignalClient } from './mqtt-signal'
 
-/** idle：未连；mqtt：信令已连（点单可走 MQTT 兜底）；webrtc：DataChannel 已通 */
+/** idle：未连；mqtt：MQTT 已连（点单可走 MQTT 兜底）；webrtc：DataChannel 已通 */
 export type CollabTransportMode = 'idle' | 'mqtt' | 'webrtc'
 
 const PEER_RETRY_MAX = 3
+const MQTT_RECONNECT_BASE_MS = 1200
+const MQTT_RECONNECT_MAX_MS = 15_000
 
 export type CollabEvents = {
   onSession: (session: CollabSession) => void
   onMembers: (members: CollabSession['members']) => void
   onStatus: (mode: CollabTransportMode) => void
   onError: (message: string) => void
+  onOrderCreated?: (order: Order, availableIngredients: string[]) => void
 }
 
 type AppMessage =
@@ -20,6 +29,11 @@ type AppMessage =
       roomId: string
     }
   | { type: 'session'; session: CollabSession; sync?: boolean }
+  | {
+      type: 'order-created'
+      order: Order
+      availableIngredients: string[]
+    }
   | { type: 'offer'; description: RTCSessionDescriptionInit }
   | { type: 'answer'; description: RTCSessionDescriptionInit }
   | {
@@ -107,8 +121,16 @@ export class CollabRoom {
   private channels = new Map<string, RTCDataChannel>()
   private peerRetryCounts = new Map<string, number>()
   private peerRetryTimers = new Map<string, number>()
+  private mqttReconnectTimer: number | null = null
+  private mqttReconnectAttempt = 0
   private session: CollabSession
   private destroyed = false
+  private onVisibility = () => {
+    if (document.visibilityState === 'visible') this.ensureMqttConnected()
+  }
+  private onOnline = () => {
+    this.ensureMqttConnected()
+  }
 
   constructor(
     roomId: string,
@@ -127,9 +149,13 @@ export class CollabRoom {
       revisedAt: 0,
     }
 
+    document.addEventListener('visibilitychange', this.onVisibility)
+    window.addEventListener('online', this.onOnline)
+
     void this.signal.joinRoom(roomId, nickname, {
       onJoined: ({ clientId, peers }) => {
         this.clientId = clientId
+        this.mqttReconnectAttempt = 0
         this.session = {
           ...this.session,
           members: [
@@ -142,6 +168,19 @@ export class CollabRoom {
         this.setMode('mqtt')
         for (const peer of peers) {
           void this.ensurePeer(peer.id, true)
+        }
+      },
+      onReconnected: () => {
+        this.mqttReconnectAttempt = 0
+        this.refreshTransportMode()
+        // 对仍在成员列表、但 DataChannel 未通的对端再拉一把
+        for (const m of this.session.members) {
+          if (!m.id || m.id === this.clientId) continue
+          if (this.channels.get(m.id)?.readyState === 'open') continue
+          this.peerRetryCounts.delete(m.id)
+          this.closePeer(m.id)
+          const shouldOffer = this.clientId > m.id
+          void this.ensurePeer(m.id, shouldOffer)
         }
       },
       onPeerLeave: (peer) => {
@@ -157,7 +196,10 @@ export class CollabRoom {
         void this.handleAppMessage(message as AppMessage, fromSessionId)
       },
       onClose: () => {
-        if (!this.destroyed) this.setMode('idle')
+        if (this.destroyed) return
+        // MQTT 断了但 DataChannel 仍通时保持 P2P 状态
+        this.refreshTransportMode()
+        this.scheduleMqttReconnect()
       },
       onError: (message) => {
         if (!this.destroyed) this.events.onError(message)
@@ -180,8 +222,27 @@ export class CollabRoom {
     if (broadcast) this.publishSession()
   }
 
+  /** 广播「已生成订单」并清空本机点单（对端本地落单，不写 GitHub）。 */
+  publishOrderCreated(order: Order, availableIngredients: string[]) {
+    this.relayPayload({
+      type: 'order-created',
+      order,
+      availableIngredients,
+    })
+    this.updateSession({
+      selectedRecipeIds: [],
+      ingredientStatus: {},
+    })
+  }
+
   destroy() {
     this.destroyed = true
+    document.removeEventListener('visibilitychange', this.onVisibility)
+    window.removeEventListener('online', this.onOnline)
+    if (this.mqttReconnectTimer !== null) {
+      window.clearTimeout(this.mqttReconnectTimer)
+      this.mqttReconnectTimer = null
+    }
     for (const timer of this.peerRetryTimers.values()) window.clearTimeout(timer)
     this.peerRetryTimers.clear()
     this.peerRetryCounts.clear()
@@ -195,17 +256,67 @@ export class CollabRoom {
     this.events.onStatus(mode)
   }
 
-  /** 优先 WebRTC；对端 DataChannel 未通时经 MQTT 中继点单 */
+  private refreshTransportMode() {
+    if (
+      [...this.channels.values()].some((c) => c.readyState === 'open')
+    ) {
+      this.setMode('webrtc')
+    } else if (this.signal.isOpen) {
+      this.setMode('mqtt')
+    } else {
+      this.setMode('idle')
+    }
+  }
+
+  /** 进前台 / 网络恢复 / MQTT 断开时：尽量拉回 MQTT。 */
+  private ensureMqttConnected() {
+    if (this.destroyed || this.signal.isOpen) return
+    this.scheduleMqttReconnect(true)
+  }
+
+  private scheduleMqttReconnect(immediate = false) {
+    if (this.destroyed || this.signal.isOpen) return
+    if (this.mqttReconnectTimer !== null) {
+      if (!immediate) return
+      window.clearTimeout(this.mqttReconnectTimer)
+      this.mqttReconnectTimer = null
+    }
+
+    const delay = immediate
+      ? 0
+      : Math.min(
+          MQTT_RECONNECT_BASE_MS * 2 ** this.mqttReconnectAttempt,
+          MQTT_RECONNECT_MAX_MS,
+        )
+
+    this.mqttReconnectTimer = window.setTimeout(() => {
+      this.mqttReconnectTimer = null
+      if (this.destroyed || this.signal.isOpen) return
+      this.mqttReconnectAttempt += 1
+      void this.signal.reconnect().then(() => {
+        if (this.destroyed) return
+        if (!this.signal.isOpen) this.scheduleMqttReconnect()
+      })
+    }, delay)
+  }
+
+  /** 优先 WebRTC；对端 DataChannel 未通时经 MQTT 中继 */
   private publishSession() {
     this.sendSession(false)
   }
 
   private sendSession(sync: boolean, onlyTo?: string) {
-    const payload: AppMessage = {
-      type: 'session',
-      session: this.session,
-      ...(sync ? { sync: true } : {}),
-    }
+    this.relayPayload(
+      {
+        type: 'session',
+        session: this.session,
+        ...(sync ? { sync: true } : {}),
+      },
+      onlyTo,
+    )
+  }
+
+  private relayPayload(payload: AppMessage, onlyTo?: string) {
     let sentViaRtc = false
     const rtcPeers = new Set<string>()
 
@@ -257,6 +368,23 @@ export class CollabRoom {
 
     if (message.type === 'session') {
       this.ingestRemoteSession(message.session, Boolean(message.sync))
+      return
+    }
+
+    if (message.type === 'order-created') {
+      if (!message.order?.id) return
+      this.events.onOrderCreated?.(
+        message.order,
+        message.availableIngredients ?? [],
+      )
+      // 对端清空点单（不经 sync 空快照保护）
+      this.session = {
+        ...this.session,
+        selectedRecipeIds: [],
+        ingredientStatus: {},
+        revisedAt: Math.max(this.session.revisedAt, Date.now()),
+      }
+      this.events.onSession(this.session)
       return
     }
 

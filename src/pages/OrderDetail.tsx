@@ -58,7 +58,12 @@ export function OrderDetailPage() {
       <section className="od-card">
         <div className="od-card-head">
           <h2>已点菜品</h2>
-          <span>{recipes.length} 份</span>
+          <div className="od-card-head-actions">
+            <span>{recipes.length} 份</span>
+            <Link className="od-add-btn" to={`/?addTo=${order.id}`}>
+              加菜
+            </Link>
+          </div>
         </div>
         <ul className="od-dish-list">
           {recipes.map((recipe) =>

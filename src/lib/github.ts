@@ -44,6 +44,33 @@ export function thumbnailRawUrl(
   return `https://testingcf.jsdelivr.net/gh/${settings.owner}/${settings.repo}@${settings.branch}/${clean}`
 }
 
+/** 上传约定路径：assets/thumbnails/{recipeId}.jpg */
+export function thumbnailPathForRecipe(recipeId: string) {
+  return `${THUMBNAIL_DIR}/${recipeId}.jpg`
+}
+
+/** 把 thumbnail 字段（相对路径或 CDN/raw URL）收成仓库内路径，供删除用。 */
+export function normalizeThumbnailRepoPath(path: string): string {
+  const raw = path.trim()
+  if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return ''
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    return raw.replace(/^\//, '')
+  }
+  try {
+    const { pathname } = new URL(raw)
+    const marker = `/${THUMBNAIL_DIR}/`
+    const idx = pathname.indexOf(marker)
+    if (idx >= 0) {
+      return pathname.slice(idx + 1).replace(/\/+$/, '')
+    }
+    const file = pathname.match(/\/thumbnails\/([^/?#]+)$/i)?.[1]
+    if (file) return `${THUMBNAIL_DIR}/${file}`
+  } catch {
+    // ignore
+  }
+  return ''
+}
+
 export async function fetchAppData(settings: GithubSettings): Promise<{
   data: AppData
   sha: string | null
@@ -154,10 +181,11 @@ export async function uploadThumbnail(
 
 export async function deleteThumbnail(
   settings: GithubSettings,
-  path: string,
+  pathOrUrl: string,
 ): Promise<void> {
-  if (!path || path.startsWith('http') || path.startsWith('data:')) return
-  assertConfigured(settings)
+  const path = normalizeThumbnailRepoPath(pathOrUrl)
+  if (!path) return
+  if (!settings.owner || !settings.repo || !settings.token) return
   const octokit = client(settings.token)
   try {
     const existing = await octokit.repos.getContent({
@@ -176,6 +204,21 @@ export async function deleteThumbnail(
       branch: settings.branch,
     })
   } catch {
-    // best effort
+    // best effort（文件本就不存在等）
+  }
+}
+
+/** 按菜谱 ID（及可选的 thumbnail 字段）删除仓库中的封面文件。 */
+export async function deleteRecipeThumbnail(
+  settings: GithubSettings,
+  recipeId: string,
+  thumbnailField?: string,
+): Promise<void> {
+  const candidates = new Set<string>()
+  if (recipeId) candidates.add(thumbnailPathForRecipe(recipeId))
+  const fromField = thumbnailField ? normalizeThumbnailRepoPath(thumbnailField) : ''
+  if (fromField) candidates.add(fromField)
+  for (const path of candidates) {
+    await deleteThumbnail(settings, path)
   }
 }

@@ -14,7 +14,7 @@ import {
   type CollabTransportMode,
 } from '../lib/collab'
 import { loadActiveRoomId } from '../lib/storage'
-import type { CollabSession } from '../types'
+import type { CollabSession, Order } from '../types'
 import { useApp } from './AppContext'
 
 type CollabContextValue = {
@@ -23,14 +23,18 @@ type CollabContextValue = {
   error: string
   roomId: string
   patchSession: (partial: Partial<CollabSession>) => void
+  /** 生成订单后广播给房间；本机点单清空。GitHub 仍由调用方 saveOrder。 */
+  publishOrderCreated: (order: Order, availableIngredients: string[]) => void
   clearError: () => void
 }
 
 const CollabContext = createContext<CollabContextValue | null>(null)
 
 export function CollabProvider({ children }: { children: ReactNode }) {
-  const { data, settings } = useApp()
+  const { settings, applyRemoteOrder } = useApp()
   const roomRef = useRef<CollabRoom | null>(null)
+  const applyRemoteOrderRef = useRef(applyRemoteOrder)
+  applyRemoteOrderRef.current = applyRemoteOrder
   const [roomId, setRoomId] = useState(() => loadActiveRoomId())
   const [session, setSession] = useState<CollabSession>(() =>
     createEmptySession(roomId),
@@ -59,9 +63,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
           setSession((prev) => ({ ...prev, members })),
         onStatus: setMode,
         onError: setError,
+        onOrderCreated: (order, availableIngredients) => {
+          applyRemoteOrderRef.current(order, availableIngredients)
+        },
       },
       {
-        availableIngredients: data.availableIngredients,
+        // 筛选「已有食材」默认全不选，由用户按需勾选
+        availableIngredients: [],
         filterMode: 'any',
         selectedRecipeIds: [],
       },
@@ -80,6 +88,13 @@ export function CollabProvider({ children }: { children: ReactNode }) {
     roomRef.current?.updateSession(partial)
   }, [])
 
+  const publishOrderCreated = useCallback(
+    (order: Order, availableIngredients: string[]) => {
+      roomRef.current?.publishOrderCreated(order, availableIngredients)
+    },
+    [],
+  )
+
   const clearError = useCallback(() => setError(''), [])
 
   const value = useMemo(
@@ -89,9 +104,10 @@ export function CollabProvider({ children }: { children: ReactNode }) {
       error,
       roomId,
       patchSession,
+      publishOrderCreated,
       clearError,
     }),
-    [session, mode, error, roomId, patchSession, clearError],
+    [session, mode, error, roomId, patchSession, publishOrderCreated, clearError],
   )
 
   return (
