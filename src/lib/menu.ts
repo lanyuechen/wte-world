@@ -69,6 +69,15 @@ export function buildMenuSections(
   return [{ tag: ALL_CATEGORY, recipes: matched }, ...tagSections]
 }
 
+/** 左侧分类：随筛选结果变化，去掉「全部」 */
+export function navCategoriesFromSections(
+  sections: MenuSection[],
+): MenuCategory[] {
+  return sections
+    .filter((s) => s.tag !== ALL_CATEGORY)
+    .map((s) => ({ tag: s.tag, count: s.recipes.length }))
+}
+
 export function buildSectionStarts(sections: MenuSection[]) {
   const map = new Map<string, number>()
   let y = 0

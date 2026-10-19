@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
@@ -7,13 +7,19 @@ import { OrderFilterPanel } from '../components/OrderFilterPanel'
 import { RecipeCard } from '../components/RecipeCard'
 import { RecipeSheet } from '../components/RecipeSheet'
 import { useMenuCategoryNav } from '../hooks/useMenuCategoryNav'
+import { flyToCart } from '../lib/flyToCart'
 import {
   ALL_CATEGORY,
   buildMenuCategories,
   buildMenuSections,
   buildOrderTitle,
+  navCategoriesFromSections,
 } from '../lib/menu'
-import { buildIngredientStatus, countRecipeOrders } from '../lib/recipes'
+import {
+  buildIngredientStatus,
+  collectRecipeIngredients,
+  countRecipeOrders,
+} from '../lib/recipes'
 import type { CollabSession, FilterMode, Order, Recipe } from '../types'
 
 function FilterIcon() {
@@ -54,6 +60,8 @@ function CartIcon() {
   )
 }
 
+const SUBMIT_DELAY_MS = 220
+
 export function OrderPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -86,26 +94,30 @@ export function OrderPage() {
   const [cartOpen, setCartOpen] = useState(false)
   const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  /** 飞入中：按钮可先亮勾，数字等落地后再加 */
+  const [pendingAdds, setPendingAdds] = useState(() => new Set<string>())
+  const cartIconRef = useRef<HTMLSpanElement>(null)
+  const selectedIdsRef = useRef(session.selectedRecipeIds)
+  selectedIdsRef.current = session.selectedRecipeIds
 
   const allCategories = useMemo(
     () => buildMenuCategories(data.recipes),
     [data.recipes],
   )
 
-  const recipeIngredients = useMemo(() => {
-    const set = new Set<string>()
-    data.recipes.forEach((r) =>
-      r.ingredients.forEach((i) => {
-        const v = i.trim()
-        if (v) set.add(v)
-      }),
-    )
-    return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
-  }, [data.recipes])
+  const recipeIngredients = useMemo(
+    () => collectRecipeIngredients(data.recipes),
+    [data.recipes],
+  )
 
   const recipeOrderCounts = useMemo(
     () => countRecipeOrders(data.orders),
     [data.orders],
+  )
+
+  const selectedIdSet = useMemo(
+    () => new Set(session.selectedRecipeIds),
+    [session.selectedRecipeIds],
   )
 
   const sections = useMemo(
@@ -126,12 +138,8 @@ export function OrderPage() {
     ],
   )
 
-  /** 左侧分组随筛选/搜索结果变化，仅保留仍有菜的分类 */
   const categories = useMemo(
-    () =>
-      sections
-        .filter((s) => s.tag !== ALL_CATEGORY)
-        .map((s) => ({ tag: s.tag, count: s.recipes.length })),
+    () => navCategoriesFromSections(sections),
     [sections],
   )
 
@@ -149,40 +157,87 @@ export function OrderPage() {
 
   const filterActive = session.availableIngredients.length > 0
 
-  const patch = (partial: Partial<CollabSession>) => {
-    patchSession(partial)
-  }
-
-  const setAvailableIngredients = (availableIngredients: string[]) => {
-    patch({
-      availableIngredients,
+  const patchWithStatus = (
+    partial: Partial<CollabSession> & {
+      selectedRecipeIds?: string[]
+      availableIngredients?: string[]
+    },
+  ) => {
+    const selectedRecipeIds =
+      partial.selectedRecipeIds ?? session.selectedRecipeIds
+    const availableIngredients =
+      partial.availableIngredients ?? session.availableIngredients
+    patchSession({
+      ...partial,
       ingredientStatus: buildIngredientStatus(
         data.recipes,
-        session.selectedRecipeIds,
+        selectedRecipeIds,
         availableIngredients,
         session.ingredientStatus,
       ),
     })
   }
 
+  const setAvailableIngredients = (availableIngredients: string[]) => {
+    patchWithStatus({ availableIngredients })
+  }
+
   const setSelectedIds = (selectedRecipeIds: string[]) => {
-    patch({
-      selectedRecipeIds,
-      ingredientStatus: buildIngredientStatus(
-        data.recipes,
-        selectedRecipeIds,
-        session.availableIngredients,
-        session.ingredientStatus,
-      ),
+    patchWithStatus({ selectedRecipeIds })
+  }
+
+  const clearPendingAdd = (id: string) => {
+    setPendingAdds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
     })
   }
 
-  const addRecipe = (id: string) => {
-    if (session.selectedRecipeIds.includes(id)) return
-    setSelectedIds([...session.selectedRecipeIds, id])
+  const commitAddRecipe = (id: string) => {
+    clearPendingAdd(id)
+    const prev = selectedIdsRef.current
+    if (prev.includes(id)) return
+    setSelectedIds([...prev, id])
+    cartIconRef.current?.animate(
+      [
+        { transform: 'scale(1)' },
+        { transform: 'scale(1.18)' },
+        { transform: 'scale(1)' },
+      ],
+      { duration: 320, easing: 'ease' },
+    )
+  }
+
+  const playFlyToCart = (
+    id: string,
+    origin: HTMLElement | null | undefined,
+    onDone: () => void,
+  ) => {
+    const cart = cartIconRef.current
+    const recipe = data.recipes.find((r) => r.id === id)
+    if (!origin || !cart || !recipe) {
+      onDone()
+      return
+    }
+    flyToCart({
+      from: origin,
+      to: cart,
+      imageUrl: thumbUrl(recipe.thumbnail) || undefined,
+      label: recipe.name,
+      onDone,
+    })
+  }
+
+  const addRecipe = (id: string, origin?: HTMLElement | null) => {
+    if (selectedIdSet.has(id) || pendingAdds.has(id)) return
+    setPendingAdds((prev) => new Set(prev).add(id))
+    playFlyToCart(id, origin, () => commitAddRecipe(id))
   }
 
   const removeRecipe = (id: string) => {
+    clearPendingAdd(id)
     const next = session.selectedRecipeIds.filter((x) => x !== id)
     setSelectedIds(next)
     if (!next.length) setCartOpen(false)
@@ -196,80 +251,89 @@ export function OrderPage() {
     [session.selectedRecipeIds, data.recipes],
   )
 
-  const showCartSheet = cartOpen && selectedRecipes.length > 0
+  const selectedCount = session.selectedRecipeIds.length
+  const showCartSheet = cartOpen && selectedCount > 0
 
-  const toggleAddRecipe = (id: string) => {
-    if (session.selectedRecipeIds.includes(id)) removeRecipe(id)
-    else addRecipe(id)
+  const toggleAddRecipe = (id: string, origin?: HTMLElement | null) => {
+    if (pendingAdds.has(id)) return
+    if (selectedIdSet.has(id)) removeRecipe(id)
+    else addRecipe(id, origin)
   }
 
-  const setFilterMode = (filterMode: FilterMode) => patch({ filterMode })
+  const isRecipePicked = (id: string) =>
+    selectedIdSet.has(id) || pendingAdds.has(id)
 
-  const createOrder = () => {
-    if (submitting) return
-    if (!session.selectedRecipeIds.length) {
-      setLocalError('请至少选择一道菜')
-      return
-    }
-    setLocalError('')
-    clearError()
-    setSubmitting(true)
-    const order: Order = {
-      id: crypto.randomUUID(),
-      title: buildOrderTitle(roomId),
-      recipeIds: session.selectedRecipeIds,
-      ingredientStatus: buildIngredientStatus(
-        data.recipes,
-        session.selectedRecipeIds,
-        session.availableIngredients,
-        session.ingredientStatus,
-      ),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+  const setFilterMode = (filterMode: FilterMode) =>
+    patchSession({ filterMode })
+
+  const finishSubmit = (
+    order: Order,
+    mode: 'create' | 'add',
+  ) => {
     window.setTimeout(() => {
       void saveOrder(order, session.availableIngredients)
-      publishOrderCreated(order, session.availableIngredients)
+      if (mode === 'create') {
+        publishOrderCreated(order, session.availableIngredients)
+      } else {
+        publishOrderUpdated(order, session.availableIngredients)
+        patchSession({ selectedRecipeIds: [], ingredientStatus: {} })
+      }
       navigate(`/orders/${order.id}`)
-    }, 220)
+    }, SUBMIT_DELAY_MS)
   }
 
-  const addDishesToOrder = () => {
+  const submitSelection = () => {
     if (submitting) return
-    if (!targetOrder) {
-      createOrder()
-      return
-    }
-    if (!session.selectedRecipeIds.length) {
-      setLocalError('请至少选择一道要加的菜')
+    if (!selectedCount) {
+      setLocalError(isAddMode ? '请至少选择一道要加的菜' : '请至少选择一道菜')
       return
     }
     setLocalError('')
     clearError()
     setSubmitting(true)
-    const recipeIds = [
-      ...new Set([...targetOrder.recipeIds, ...session.selectedRecipeIds]),
-    ]
-    const order: Order = {
-      ...targetOrder,
-      recipeIds,
-      ingredientStatus: buildIngredientStatus(
-        data.recipes,
-        recipeIds,
-        session.availableIngredients,
+    setCartOpen(false)
+
+    const now = new Date().toISOString()
+    if (isAddMode && targetOrder) {
+      const recipeIds = [
+        ...new Set([...targetOrder.recipeIds, ...session.selectedRecipeIds]),
+      ]
+      finishSubmit(
         {
-          ...targetOrder.ingredientStatus,
-          ...session.ingredientStatus,
+          ...targetOrder,
+          recipeIds,
+          ingredientStatus: buildIngredientStatus(
+            data.recipes,
+            recipeIds,
+            session.availableIngredients,
+            {
+              ...targetOrder.ingredientStatus,
+              ...session.ingredientStatus,
+            },
+          ),
+          updatedAt: now,
         },
-      ),
-      updatedAt: new Date().toISOString(),
+        'add',
+      )
+      return
     }
-    window.setTimeout(() => {
-      void saveOrder(order, session.availableIngredients)
-      publishOrderUpdated(order, session.availableIngredients)
-      patchSession({ selectedRecipeIds: [], ingredientStatus: {} })
-      navigate(`/orders/${order.id}`)
-    }, 220)
+
+    finishSubmit(
+      {
+        id: crypto.randomUUID(),
+        title: buildOrderTitle(roomId),
+        recipeIds: session.selectedRecipeIds,
+        ingredientStatus: buildIngredientStatus(
+          data.recipes,
+          session.selectedRecipeIds,
+          session.availableIngredients,
+          session.ingredientStatus,
+        ),
+        createdAt: now,
+        updatedAt: now,
+      },
+      'create',
+    )
   }
 
   return (
@@ -388,10 +452,10 @@ export function OrderPage() {
                       <RecipeCard
                         recipe={recipe}
                         thumbUrl={thumbUrl(recipe.thumbnail)}
-                        selected={session.selectedRecipeIds.includes(recipe.id)}
+                        selected={isRecipePicked(recipe.id)}
                         orderCount={recipeOrderCounts.get(recipe.id) ?? 0}
                         onOpen={() => setDetailRecipe(recipe)}
-                        onAdd={() => toggleAddRecipe(recipe.id)}
+                        onAdd={(origin) => toggleAddRecipe(recipe.id, origin)}
                       />
                     </MenuCardShell>
                   ))}
@@ -416,7 +480,7 @@ export function OrderPage() {
           />
           <div className="order-cart-sheet" role="dialog" aria-label="已选菜品">
             <div className="order-cart-sheet-head">
-              <h3>已选菜品（{selectedRecipes.length}）</h3>
+              <h3>已选菜品（{selectedCount}）</h3>
               <button
                 type="button"
                 className="order-cart-sheet-clear"
@@ -466,38 +530,29 @@ export function OrderPage() {
         <button
           type="button"
           className="order-cart-info"
-          disabled={!session.selectedRecipeIds.length}
+          disabled={!selectedCount}
           aria-expanded={showCartSheet}
           onClick={() => {
-            if (!session.selectedRecipeIds.length) return
+            if (!selectedCount) return
             setCartOpen((v) => !v)
           }}
         >
           <span
-            className={`order-cart-icon ${session.selectedRecipeIds.length ? 'has' : ''}`}
+            ref={cartIconRef}
+            className={`order-cart-icon ${selectedCount ? 'has' : ''}`}
           >
             <CartIcon />
-            {session.selectedRecipeIds.length > 0 && (
-              <i key={session.selectedRecipeIds.length}>
-                {session.selectedRecipeIds.length}
-              </i>
-            )}
+            {selectedCount > 0 && <i key={selectedCount}>{selectedCount}</i>}
           </span>
           <span className="order-cart-text">
-            {session.selectedRecipeIds.length
-              ? `已选 ${session.selectedRecipeIds.length} 道`
-              : '未选菜品'}
+            {selectedCount ? `已选 ${selectedCount} 道` : '未选菜品'}
           </span>
         </button>
         <button
           className={`order-cart-btn ${submitting ? 'is-loading' : ''}`}
           type="button"
-          disabled={!session.selectedRecipeIds.length || submitting}
-          onClick={() => {
-            setCartOpen(false)
-            if (isAddMode) addDishesToOrder()
-            else createOrder()
-          }}
+          disabled={!selectedCount || submitting}
+          onClick={submitSelection}
         >
           {submitting ? '处理中…' : isAddMode ? '加菜' : '下单'}
         </button>
@@ -507,13 +562,13 @@ export function OrderPage() {
         <RecipeSheet
           recipe={detailRecipe}
           thumbUrl={thumbUrl(detailRecipe.thumbnail)}
-          selected={session.selectedRecipeIds.includes(detailRecipe.id)}
+          selected={isRecipePicked(detailRecipe.id)}
           onClose={() => setDetailRecipe(null)}
-          onAdd={() => addRecipe(detailRecipe.id)}
+          onAdd={(origin) => addRecipe(detailRecipe.id, origin)}
           onRemove={() => removeRecipe(detailRecipe.id)}
           onDelete={() => {
             const id = detailRecipe.id
-            if (session.selectedRecipeIds.includes(id)) removeRecipe(id)
+            if (isRecipePicked(id)) removeRecipe(id)
             deleteLibraryRecipe(id)
           }}
         />

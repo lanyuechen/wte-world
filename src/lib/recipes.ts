@@ -1,5 +1,38 @@
 import type { FilterMode, IngredientStatus, Order, Recipe } from '../types'
 
+const zhSort = (a: string, b: string) => a.localeCompare(b, 'zh')
+
+/** 收集菜谱中的去重字段（trim 后非空），按中文排序 */
+function collectSortedFields(
+  recipes: Recipe[],
+  pick: (recipe: Recipe) => readonly string[],
+  seed: Iterable<string> = [],
+) {
+  const set = new Set<string>()
+  for (const item of seed) {
+    const v = item.trim()
+    if (v) set.add(v)
+  }
+  for (const recipe of recipes) {
+    for (const raw of pick(recipe)) {
+      const v = raw.trim()
+      if (v) set.add(v)
+    }
+  }
+  return [...set].sort(zhSort)
+}
+
+export function collectRecipeIngredients(
+  recipes: Recipe[],
+  seed: Iterable<string> = [],
+) {
+  return collectSortedFields(recipes, (r) => r.ingredients, seed)
+}
+
+export function collectRecipeTags(recipes: Recipe[]) {
+  return collectSortedFields(recipes, (r) => r.tags)
+}
+
 /** 按订单列表统计每道菜被点过的次数（每个订单计 1 次） */
 export function countRecipeOrders(orders: Order[]): Map<string, number> {
   const counts = new Map<string, number>()
@@ -41,9 +74,10 @@ export function buildIngredientStatus(
   prev: Record<string, IngredientStatus> = {},
 ): Record<string, IngredientStatus> {
   const availableSet = new Set(available)
+  const byId = new Map(recipes.map((r) => [r.id, r]))
   const names = new Set<string>()
   for (const id of recipeIds) {
-    const recipe = recipes.find((r) => r.id === id)
+    const recipe = byId.get(id)
     recipe?.ingredients.forEach((ing) => names.add(ing))
   }
   const next: Record<string, IngredientStatus> = {}

@@ -153,41 +153,42 @@ const DEFAULT_ORDER_FILTER: OrderFilterState = {
   filterMode: 'any',
 }
 
+function normalizeFilterMode(mode: unknown): FilterMode {
+  return mode === 'all' || mode === 'any' ? mode : 'any'
+}
+
+function normalizeIngredients(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return [
+    ...new Set(
+      raw
+        .map((i) => (typeof i === 'string' ? i.trim() : ''))
+        .filter(Boolean),
+    ),
+  ]
+}
+
 /** 点单筛选项（已有食材 + 匹配模式）本机持久化。 */
 export function loadOrderFilter(): OrderFilterState {
   const raw = localStorage.getItem(STORAGE_KEYS.orderFilter)
-  if (!raw) return { ...DEFAULT_ORDER_FILTER, availableIngredients: [] }
+  if (!raw) return { ...DEFAULT_ORDER_FILTER }
   try {
     const parsed = JSON.parse(raw) as Partial<OrderFilterState>
-    const ingredients = Array.isArray(parsed.availableIngredients)
-      ? parsed.availableIngredients
-          .map((i) => (typeof i === 'string' ? i.trim() : ''))
-          .filter(Boolean)
-      : []
-    const filterMode: FilterMode =
-      parsed.filterMode === 'all' || parsed.filterMode === 'any'
-        ? parsed.filterMode
-        : 'any'
-    return { availableIngredients: ingredients, filterMode }
+    return {
+      availableIngredients: normalizeIngredients(parsed.availableIngredients),
+      filterMode: normalizeFilterMode(parsed.filterMode),
+    }
   } catch {
-    return { ...DEFAULT_ORDER_FILTER, availableIngredients: [] }
+    return { ...DEFAULT_ORDER_FILTER }
   }
 }
 
 export function saveOrderFilter(state: OrderFilterState) {
-  const availableIngredients = [
-    ...new Set(
-      state.availableIngredients
-        .map((i) => i.trim())
-        .filter(Boolean),
-    ),
-  ]
-  const filterMode: FilterMode =
-    state.filterMode === 'all' || state.filterMode === 'any'
-      ? state.filterMode
-      : 'any'
   localStorage.setItem(
     STORAGE_KEYS.orderFilter,
-    JSON.stringify({ availableIngredients, filterMode }),
+    JSON.stringify({
+      availableIngredients: normalizeIngredients(state.availableIngredients),
+      filterMode: normalizeFilterMode(state.filterMode),
+    }),
   )
 }

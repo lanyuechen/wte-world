@@ -19,6 +19,7 @@ import {
   thumbnailRawUrl,
   uploadThumbnail,
 } from '../lib/github'
+import { collectRecipeIngredients } from '../lib/recipes'
 import { loadCachedData, loadSettings, saveCachedData, saveSettings } from '../lib/storage'
 
 const CONFLICT_RETRY_MAX = 2
@@ -446,11 +447,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [commit],
   )
 
-  const allIngredients = useMemo(() => {
-    const set = new Set<string>(data.availableIngredients)
-    data.recipes.forEach((r) => r.ingredients.forEach((i) => set.add(i)))
-    return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
-  }, [data])
+  const allIngredients = useMemo(
+    () => collectRecipeIngredients(data.recipes, data.availableIngredients),
+    [data],
+  )
 
   const value: AppContextValue = {
     data: data ?? EMPTY_APP_DATA,

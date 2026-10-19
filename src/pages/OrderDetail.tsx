@@ -122,10 +122,7 @@ export function OrderDetailPage() {
                   </div>
                   <div className="od-dish-body">
                     <h3>{recipe.name}</h3>
-                    <p>
-                      {recipe.ingredients.slice(0, 4).join('、') || '暂无食材'}
-                      {recipe.ingredients.length > 4 ? '…' : ''}
-                    </p>
+                    <p>{recipe.ingredients.join('、') || '暂无食材'}</p>
                   </div>
                   <button
                     type="button"

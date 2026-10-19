@@ -57,14 +57,16 @@ export function RecipeCard({
   /** 历史订单中出现的次数 */
   orderCount?: number
   onOpen?: () => void
-  onAdd?: () => void
+  /** 传入缩略图节点，便于飞入购物车 */
+  onAdd?: (origin: HTMLElement) => void
 }) {
+  const thumbRef = useRef<HTMLDivElement>(null)
   const meta = recipe.tags.slice(0, 2).join(' · ')
 
   return (
     <div className={`recipe-card menu-item ${selected ? 'selected' : ''}`}>
       <button type="button" className="menu-item-main" onClick={onOpen}>
-        <div className="card-thumb">
+        <div ref={thumbRef} className="card-thumb">
           {thumbUrl ? (
             <img src={thumbUrl} alt="" referrerPolicy="no-referrer" />
           ) : (
@@ -82,8 +84,7 @@ export function RecipeCard({
           <h3>{recipe.name}</h3>
           {meta && <p className="card-meta">{meta}</p>}
           <p className="muted card-ings">
-            {recipe.ingredients.slice(0, 4).join(' · ') || '未填食材'}
-            {recipe.ingredients.length > 4 ? ' …' : ''}
+            {recipe.ingredients.join(' · ') || '未填食材'}
           </p>
         </div>
       </button>
@@ -94,7 +95,7 @@ export function RecipeCard({
         aria-pressed={selected}
         onClick={(e) => {
           e.stopPropagation()
-          onAdd?.()
+          if (thumbRef.current) onAdd?.(thumbRef.current)
         }}
       >
         <AddMark selected={selected} />

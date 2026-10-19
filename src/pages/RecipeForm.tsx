@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { ChipField } from '../components/ChipField'
 import { useApp } from '../context/AppContext'
 import { compressImageToJpeg } from '../lib/image'
+import { collectRecipeTags } from '../lib/recipes'
 import type { Recipe } from '../types'
 
 function nowIso() {
@@ -35,16 +36,10 @@ export function RecipeFormPage() {
 
   const cancelTo = '/'
 
-  const allTags = useMemo(() => {
-    const set = new Set<string>()
-    data.recipes.forEach((r) =>
-      r.tags.forEach((t) => {
-        const v = t.trim()
-        if (v) set.add(v)
-      }),
-    )
-    return [...set].sort((a, b) => a.localeCompare(b, 'zh'))
-  }, [data.recipes])
+  const allTags = useMemo(
+    () => collectRecipeTags(data.recipes),
+    [data.recipes],
+  )
 
   const onPickImage = async (file: File | null) => {
     if (!file) return

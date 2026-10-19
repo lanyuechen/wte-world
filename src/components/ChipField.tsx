@@ -43,13 +43,14 @@ export function ChipField({
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
 
+  const draftTrimmed = draft.trim()
+
   const commitDraft = () => {
-    const v = draft.trim()
-    if (!v) {
+    if (!draftTrimmed) {
       close()
       return
     }
-    if (!values.includes(v)) onChange([...values, v])
+    if (!values.includes(draftTrimmed)) onChange([...values, draftTrimmed])
     setDraft('')
   }
 
@@ -66,15 +67,15 @@ export function ChipField({
   }
 
   const filteredOptions = useMemo(() => {
-    const q = draft.trim().toLowerCase()
+    const q = draftTrimmed.toLowerCase()
     if (!q) return options
     return options.filter((item) => item.toLowerCase().includes(q))
-  }, [draft, options])
+  }, [draftTrimmed, options])
 
   const canCreate =
-    Boolean(draft.trim()) &&
-    !values.includes(draft.trim()) &&
-    !options.includes(draft.trim())
+    Boolean(draftTrimmed) &&
+    !values.includes(draftTrimmed) &&
+    !options.includes(draftTrimmed)
 
   const title = floatTitle ?? addLabel
 
@@ -146,7 +147,7 @@ export function ChipField({
           </div>
           {filteredOptions.length === 0 && !canCreate ? (
             <p className="muted form-chip-float-empty">
-              {draft.trim()
+              {draftTrimmed
                 ? '没有匹配项，按回车添加'
                 : '暂无历史项，直接输入添加'}
             </p>
@@ -174,7 +175,7 @@ export function ChipField({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={commitDraft}
                 >
-                  + 添加「{draft.trim()}」
+                  + 添加「{draftTrimmed}」
                 </button>
               )}
             </div>

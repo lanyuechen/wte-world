@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { recipeTags } from '../lib/menu'
 import type { Recipe } from '../types'
 import { OlDialog } from './OlDialog'
 
@@ -19,11 +20,12 @@ export function RecipeSheet({
   thumbUrl: string
   selected: boolean
   onClose: () => void
-  onAdd: () => void
+  onAdd: (origin?: HTMLElement | null) => void
   onRemove?: () => void
   onDelete?: () => void
 }) {
-  const tags = recipe.tags.map((t) => t.trim()).filter(Boolean)
+  const tags = recipeTags(recipe)
+  const flyOriginRef = useRef<HTMLDivElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return createPortal(
@@ -42,6 +44,17 @@ export function RecipeSheet({
         <div className="recipe-sheet-scroll">
           <div className="recipe-sheet-body">
             <div className="recipe-sheet-head">
+              <div
+                ref={flyOriginRef}
+                className="recipe-sheet-fly-origin"
+                aria-hidden
+              >
+                {thumbUrl ? (
+                  <img src={thumbUrl} alt="" referrerPolicy="no-referrer" />
+                ) : (
+                  <span>{recipe.name.slice(0, 1)}</span>
+                )}
+              </div>
               <div className="recipe-sheet-title">
                 <h2>{recipe.name}</h2>
                 {tags.length > 0 && (
@@ -120,7 +133,7 @@ export function RecipeSheet({
               type="button"
               className="btn primary"
               onClick={() => {
-                onAdd()
+                onAdd(flyOriginRef.current)
                 onClose()
               }}
             >

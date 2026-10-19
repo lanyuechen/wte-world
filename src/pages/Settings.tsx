@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
+import { OlDialog } from '../components/OlDialog'
 import { WordCloudBg } from '../components/WordCloudBg'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
 import { SCAN_CLOUD_PHRASES } from '../lib/scanPhrases'
 import { regenerateActiveRoomId } from '../lib/storage'
 import { buildScanShareUrl } from '../lib/urls'
+
+const LONG_PRESS_MS = 3000
 
 async function copyText(text: string) {
   try {
@@ -29,32 +32,16 @@ async function copyText(text: string) {
   }
 }
 
-function IconRefresh() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M20 12a8 8 0 1 1-2.3-5.6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M20 4v5h-5"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 export function SettingsPage() {
   const { settings } = useApp()
   const { roomId } = useCollab()
   const token = settings.github.token.trim()
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [copied, setCopied] = useState(false)
+  const [refreshOpen, setRefreshOpen] = useState(false)
+
+  const longPressTimer = useRef(0)
+  const suppressClick = useRef(false)
 
   const shareUrl = buildScanShareUrl(roomId, token)
 
@@ -75,6 +62,28 @@ export function SettingsPage() {
     }
   }, [shareUrl])
 
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(longPressTimer.current)
+    }
+  }, [])
+
+  const clearLongPress = () => {
+    window.clearTimeout(longPressTimer.current)
+    longPressTimer.current = 0
+  }
+
+  const startLongPress = () => {
+    clearLongPress()
+    suppressClick.current = false
+    longPressTimer.current = window.setTimeout(() => {
+      longPressTimer.current = 0
+      suppressClick.current = true
+      setCopied(false)
+      setRefreshOpen(true)
+    }, LONG_PRESS_MS)
+  }
+
   const copyLink = async () => {
     const ok = await copyText(shareUrl)
     if (!ok) return
@@ -82,7 +91,8 @@ export function SettingsPage() {
     window.setTimeout(() => setCopied(false), 1600)
   }
 
-  const updateRoom = () => {
+  const confirmRefresh = () => {
+    setRefreshOpen(false)
     setCopied(false)
     regenerateActiveRoomId()
   }
@@ -96,8 +106,22 @@ export function SettingsPage() {
             <button
               type="button"
               className="scan-qr-hit"
-              onClick={() => void copyLink()}
-              aria-label={copied ? '链接已复制' : '点击复制点单链接'}
+              aria-label={copied ? '链接已复制' : '点击复制点单链接，长按可刷新二维码'}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                startLongPress()
+              }}
+              onPointerUp={clearLongPress}
+              onPointerLeave={clearLongPress}
+              onPointerCancel={clearLongPress}
+              onContextMenu={(e) => e.preventDefault()}
+              onClick={() => {
+                if (suppressClick.current) {
+                  suppressClick.current = false
+                  return
+                }
+                void copyLink()
+              }}
             >
               {qrDataUrl ? (
                 <img className="qr poster" src={qrDataUrl} alt="共享点单二维码" />
@@ -106,17 +130,37 @@ export function SettingsPage() {
               )}
               {copied && <span className="scan-qr-copied">已复制</span>}
             </button>
-            <button
-              type="button"
-              className="scan-qr-refresh"
-              aria-label="更新二维码"
-              onClick={updateRoom}
-            >
-              <IconRefresh />
-            </button>
           </div>
         </div>
       </div>
+
+      {refreshOpen && (
+        <OlDialog
+          titleId="scan-refresh-qr-title"
+          title="刷新二维码"
+          onClose={() => setRefreshOpen(false)}
+          actions={
+            <>
+              <button
+                type="button"
+                className="ol-btn ghost"
+                onClick={() => setRefreshOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="ol-btn primary"
+                onClick={confirmRefresh}
+              >
+                确定
+              </button>
+            </>
+          }
+        >
+          <p>刷新后将生成新的协同房间，原二维码/链接将失效。是否继续？</p>
+        </OlDialog>
+      )}
     </section>
   )
 }

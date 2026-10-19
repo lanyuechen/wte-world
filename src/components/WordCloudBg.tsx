@@ -35,6 +35,7 @@ const WORD_COLORS = [
 
 /** 画布相对可视区域放大，边缘裁切形成向外延伸感 */
 const OVERSCAN = 1.22
+const CLOUD_FONT = '"Figtree", "PingFang SC", "Noto Sans SC", sans-serif'
 
 /** 跨路由复用，避免每次进扫码页重算 */
 let sharedSeed = Math.floor(Math.random() * 0xffffffff) || 1
@@ -58,7 +59,7 @@ function shuffle<T>(arr: T[], rand: () => number) {
 }
 
 function pickColor(rand: () => number) {
-  return WORD_COLORS[Math.floor(rand() * WORD_COLORS.length)]
+  return WORD_COLORS[Math.floor(rand() * WORD_COLORS.length)]!
 }
 
 function phrasesKeyOf(phrases: readonly string[]) {
@@ -81,38 +82,42 @@ function tokenizePhrases(phrases: readonly string[]): string[] {
   return out
 }
 
+function makeWord(
+  text: string,
+  size: number,
+  rand: () => number,
+): CloudWord {
+  return {
+    text,
+    size: Math.max(8, Math.round(size)),
+    color: pickColor(rand),
+  }
+}
+
 /** 大词少、小词多，便于 d3-cloud 填满矩形缝隙 */
 function buildWordList(
-  phrases: readonly string[],
+  pool: readonly string[],
   width: number,
   height: number,
   seed: number,
 ): CloudWord[] {
+  if (!pool.length) return []
   const rand = mulberry32(seed)
   const unit = Math.min(width, height)
-  const pool = tokenizePhrases(phrases)
-  if (!pool.length) return []
-
   const list: CloudWord[] = []
-  const push = (text: string, size: number) => {
-    list.push({
-      text,
-      size: Math.max(8, Math.round(size)),
-      color: pickColor(rand),
-    })
-  }
+  const pick = () => pool[Math.floor(rand() * pool.length)]!
 
   for (let i = 0; i < Math.min(8, pool.length); i++) {
-    push(pool[Math.floor(rand() * pool.length)], unit * (0.07 + rand() * 0.06))
+    list.push(makeWord(pick(), unit * (0.07 + rand() * 0.06), rand))
   }
   for (let i = 0; i < pool.length * 2; i++) {
-    push(pool[i % pool.length], unit * (0.032 + rand() * 0.028))
+    list.push(makeWord(pool[i % pool.length]!, unit * (0.032 + rand() * 0.028), rand))
   }
   for (let i = 0; i < pool.length * 5; i++) {
-    push(pool[i % pool.length], unit * (0.016 + rand() * 0.018))
+    list.push(makeWord(pool[i % pool.length]!, unit * (0.016 + rand() * 0.018), rand))
   }
   for (let i = 0; i < pool.length * 3; i++) {
-    push(pool[Math.floor(rand() * pool.length)], unit * (0.012 + rand() * 0.01))
+    list.push(makeWord(pick(), unit * (0.012 + rand() * 0.01), rand))
   }
 
   return shuffle(list, rand)
@@ -126,18 +131,17 @@ function runCloudLayout(
 ): Promise<CloudWord[]> {
   const rand = mulberry32(seed ^ 0x9e3779b9)
   return new Promise((resolve) => {
-    const layout = cloud<CloudWord>()
+    cloud<CloudWord>()
       .size([width, height])
       .words(words.map((w) => ({ ...w })))
       .padding(1.5)
       .rotate(() => (rand() < 0.5 ? 0 : 90))
-      .font('"Figtree", "PingFang SC", "Noto Sans SC", sans-serif')
+      .font(CLOUD_FONT)
       .fontWeight(600)
       .fontSize((d) => d.size ?? 12)
       .spiral('archimedean')
       .on('end', (placed) => resolve(placed as CloudWord[]))
-
-    layout.start()
+      .start()
   })
 }
 
@@ -163,14 +167,15 @@ function paintCloud(
   ctx.textBaseline = 'alphabetic'
   ctx.translate(width / 2, height / 2)
 
+  const unit = Math.min(width, height)
   for (const w of words) {
     if (w.x == null || w.y == null) continue
     const size = w.size ?? 12
-    const alpha = Math.min(0.42, 0.16 + (size / Math.min(width, height)) * 1.8)
+    const alpha = Math.min(0.42, 0.16 + (size / unit) * 1.8)
     ctx.save()
     ctx.translate(w.x, w.y)
     ctx.rotate(((w.rotate ?? 0) * Math.PI) / 180)
-    ctx.font = `600 ${size}px "Figtree", "PingFang SC", "Noto Sans SC", sans-serif`
+    ctx.font = `600 ${size}px ${CLOUD_FONT}`
     ctx.fillStyle = w.color
     ctx.globalAlpha = alpha
     ctx.fillText(w.text, 0, 0)
@@ -184,9 +189,9 @@ async function buildLayout(
   height: number,
 ): Promise<CloudWord[]> {
   const tokens = tokenizePhrases(phrases)
-  const words = buildWordList(phrases, width, height, sharedSeed)
+  const words = buildWordList(tokens, width, height, sharedSeed)
   const placed = await runCloudLayout(width, height, words, sharedSeed)
-  if (placed.length >= words.length * 0.45) return placed
+  if (!tokens.length || placed.length >= words.length * 0.45) return placed
 
   const rand = mulberry32(sharedSeed + 7)
   const unit = Math.min(width, height)
@@ -196,19 +201,18 @@ async function buildLayout(
     color: w.color,
   }))
   for (let i = 0; i < tokens.length * 4; i++) {
-    extras.push({
-      text: tokens[Math.floor(rand() * tokens.length)] ?? '',
-      size: Math.max(8, Math.round(unit * (0.011 + rand() * 0.012))),
-      color: pickColor(rand),
-    })
+    extras.push(
+      makeWord(
+        tokens[Math.floor(rand() * tokens.length)]!,
+        unit * (0.011 + rand() * 0.012),
+        rand,
+      ),
+    )
   }
   return runCloudLayout(
     width,
     height,
-    shuffle(
-      extras.filter((w) => w.text),
-      rand,
-    ),
+    shuffle(extras, rand),
     sharedSeed + 13,
   )
 }
