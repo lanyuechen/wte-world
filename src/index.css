@@ -141,7 +141,8 @@ p {
 }
 
 body:has(.app-shell.is-order),
-body:has(.app-shell.is-form) {
+body:has(.app-shell.is-form),
+body:has(.app-shell.is-scan) {
   overflow: hidden;
   height: 100dvh;
 }
@@ -210,11 +211,45 @@ body:has(.app-shell.is-form) {
   animation: rise 0.32s ease both;
 }
 
-.app-shell.is-order-detail,
-.app-shell.is-scan {
+.app-shell.is-order-detail {
   padding-top: var(--topbar-h);
   padding-left: 0;
   padding-right: 0;
+}
+
+.app-shell.is-scan {
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: var(--topbar-h);
+  padding-left: 0;
+  padding-right: 0;
+  padding-bottom: calc(4.1rem + env(safe-area-inset-bottom));
+}
+
+.app-shell.is-scan .page-scan {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell.is-scan .page-scan > .page-transition {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: none;
+}
+
+.app-shell.is-scan .page-scan > .page-transition > * {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .topbar {
@@ -973,6 +1008,7 @@ button.topbar-gh:hover {
 .recipe-card.menu-item .card-body {
   padding: 0;
   gap: 0.2rem;
+  min-width: 0;
   min-height: 72px;
   justify-content: flex-start;
 }
@@ -983,18 +1019,29 @@ button.topbar-gh:hover {
   font-weight: 600;
   color: #222;
   letter-spacing: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .recipe-card.menu-item .card-meta {
   font-size: 0.72rem;
   color: #999;
   font-weight: 400;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .recipe-card.menu-item .card-ings {
   font-size: 0.75rem;
   color: #999;
   margin-top: auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .recipe-card.menu-item.selected {
@@ -2512,14 +2559,15 @@ code {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  min-height: calc(100vh - 9rem);
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
   gap: 0.75rem;
-  padding: 1rem 0 1.5rem;
+  padding: 0;
   animation: rise 0.45s ease both;
 }
 
@@ -2529,11 +2577,13 @@ code {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
   gap: 0.75rem;
   width: 100%;
 }
 
-.danmaku {
+.wordcloud-bg {
   position: absolute;
   inset: 0;
   z-index: 0;
@@ -2541,46 +2591,33 @@ code {
   pointer-events: none;
 }
 
-.danmaku-space {
+.wordcloud-bg-canvas {
   position: absolute;
-  inset: 0;
-  perspective: 560px;
-  perspective-origin: 50% 42%;
-  transform-style: preserve-3d;
+  left: 50%;
+  top: 50%;
+  display: block;
+  /* 宽高由 JS 设为可视区域的 OVERSCAN 倍，居中裁切 */
+  filter: blur(16px);
+  opacity: 0.55;
+  transform: translate(-50%, -50%) scale(1.02);
+  transition:
+    filter 0.75s ease,
+    opacity 0.75s ease,
+    transform 0.75s ease;
 }
 
-.danmaku-item {
-  --dm-z: 0px;
-  position: absolute;
-  left: 100%;
-  white-space: nowrap;
-  color: var(--brand);
-  font-weight: 550;
-  letter-spacing: 0.02em;
-  transform-origin: left center;
-  transform-style: preserve-3d;
-  will-change: transform;
-  animation-name: danmaku-move-3d;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-}
-
-@keyframes danmaku-move-3d {
-  from {
-    /* 多留出屏距离，近景放大后也不会贴边闪现 */
-    transform: translate3d(28vw, 0, var(--dm-z));
-  }
-  to {
-    transform: translate3d(calc(-100% - 100vw - 28vw), 0, var(--dm-z));
-  }
+.wordcloud-bg-canvas.is-ready {
+  filter: blur(0);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .danmaku-item {
-    animation: none;
-    left: 50%;
-    transform: translate3d(-50%, 0, var(--dm-z));
-    opacity: 0.08 !important;
+  .wordcloud-bg-canvas {
+    filter: none;
+    opacity: 1;
+    transform: translate(-50%, -50%);
+    transition: none;
   }
 }
 
@@ -2603,9 +2640,12 @@ code {
   margin: 0.5rem 0;
   padding: 1rem;
   border-radius: 20px;
-  background: rgba(250, 252, 250, 0.95);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  background: rgba(250, 252, 250, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 2px 6px rgba(26, 46, 36, 0.04),
+    0 12px 28px rgba(26, 46, 36, 0.1),
+    0 28px 56px rgba(26, 46, 36, 0.12);
   animation: pop-in 0.45s ease 0.08s both;
 }
 
@@ -2706,15 +2746,16 @@ code {
 }
 
 .scan-rooms {
-  justify-content: flex-start;
-  padding-top: 0.5rem;
+  justify-content: center;
+  padding: 0;
 }
 
 .scan-qr-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin: 0.35rem 0 0.25rem;
+  justify-content: center;
+  margin: 0;
 }
 
 .scan-qr-card .scan-qr-frame {

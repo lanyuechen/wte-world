@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
-import { Danmaku } from '../components/Danmaku'
+import { WordCloudBg } from '../components/WordCloudBg'
 import { useApp } from '../context/AppContext'
 import { useCollab } from '../context/CollabContext'
-import { SCAN_DANMAKU_PHRASES } from '../lib/scanPhrases'
+import { SCAN_CLOUD_PHRASES } from '../lib/scanPhrases'
 import { regenerateActiveRoomId } from '../lib/storage'
 import { buildScanShareUrl } from '../lib/urls'
 
@@ -89,11 +89,8 @@ export function SettingsPage() {
 
   return (
     <section className="scan-poster scan-rooms">
-      <Danmaku phrases={SCAN_DANMAKU_PHRASES} />
+      <WordCloudBg phrases={SCAN_CLOUD_PHRASES} />
       <div className="scan-poster-content">
-        <p className="scan-kicker">家庭共享点餐</p>
-        <h1 className="scan-brand">吃什么</h1>
-
         <div className="scan-qr-card">
           <div className={`scan-qr-frame ${copied ? 'is-copied' : ''}`}>
             <button
@@ -103,7 +100,7 @@ export function SettingsPage() {
               aria-label={copied ? '链接已复制' : '点击复制点单链接'}
             >
               {qrDataUrl ? (
-                <img className="qr poster" src={qrDataUrl} alt="" />
+                <img className="qr poster" src={qrDataUrl} alt="共享点单二维码" />
               ) : (
                 <div className="thumb-placeholder large">生成中…</div>
               )}
@@ -119,10 +116,6 @@ export function SettingsPage() {
             </button>
           </div>
         </div>
-
-        <p className="scan-hint">
-          吾日三省吾身，早饭吃什么，午饭吃什么，晚饭吃什么
-        </p>
       </div>
     </section>
   )

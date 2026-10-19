@@ -202,7 +202,7 @@ export function Layout() {
       <main
         className={`page ${onOrderPage ? 'page-order' : ''} ${
           onRecipeForm ? 'page-form' : ''
-        }`}
+        } ${onScanPage ? 'page-scan' : ''}`}
       >
         <div key={location.pathname} className="page-transition">
           <Outlet />

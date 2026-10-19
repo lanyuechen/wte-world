@@ -87,7 +87,7 @@ export function OrderPage() {
   const [detailRecipe, setDetailRecipe] = useState<Recipe | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const categories = useMemo(
+  const allCategories = useMemo(
     () => buildMenuCategories(data.recipes),
     [data.recipes],
   )
@@ -112,18 +112,27 @@ export function OrderPage() {
     () =>
       buildMenuSections(
         data.recipes,
-        categories,
+        allCategories,
         session.availableIngredients,
         session.filterMode,
         query,
       ),
     [
       data.recipes,
-      categories,
+      allCategories,
       session.availableIngredients,
       session.filterMode,
       query,
     ],
+  )
+
+  /** 左侧分组随筛选/搜索结果变化，仅保留仍有菜的分类 */
+  const categories = useMemo(
+    () =>
+      sections
+        .filter((s) => s.tag !== ALL_CATEGORY)
+        .map((s) => ({ tag: s.tag, count: s.recipes.length })),
+    [sections],
   )
 
   const {
